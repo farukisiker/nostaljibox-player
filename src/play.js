@@ -5,6 +5,7 @@ import { setupHostLink } from "./host-link.js";
 import "./play.css";
 
 const id = new URLSearchParams(location.search).get("id");
+const BROKEN_SHADERS = ["2xScaleHQ.glslp", "4xScaleHQ.glslp"];
 const errorEl = document.getElementById("error");
 
 function fail(msg) {
@@ -72,6 +73,15 @@ async function lockOrientation(core) {
       proto.getRetroArchCfg = function () {
         return base.call(this) + fullScreenCfg;
       };
+      // ScaleHQ shifts the picture right on some phones (an 8-pixel strip of the backdrop shows
+      // on the left), so keep it out of the shader menu. The menu is built after this event.
+      const shaders = window.EJS_emulator.config.shaders || {};
+      for (const name of BROKEN_SHADERS) delete shaders[name];
+    },
+    // Runs after saved settings are applied: move players who had picked ScaleHQ back to SABR.
+    EJS_onGameStart: () => {
+      const emu = window.EJS_emulator;
+      if (BROKEN_SHADERS.includes(emu.getSettingValue("shader"))) emu.changeSettingOption("shader", "sabr");
     },
   });
   const script = document.createElement("script");
