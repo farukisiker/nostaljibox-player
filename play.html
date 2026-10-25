@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>NostaljiBox</title>
+  </head>
+  <body class="play">
+    <div id="game"></div>
+    <div id="play-tools">
+      <button id="back" aria-label="Kütüphaneye dön">←</button>
+      <button id="p2" aria-label="2. oyuncu ekle">👥</button>
+    </div>
+    <div id="error" class="hidden"></div>
+
+    <div id="link" class="overlay hidden">
+      <div class="panel link-panel">
+        <h3>2. oyuncu ekle</h3>
+        <p id="link-status">Hazırlanıyor…</p>
+        <div class="link-grid">
+          <div class="link-step">
+            <b>1.</b> İkinci telefonda NostaljiBox → <b>2. oyuncu olarak katıl</b>, sonra bu kodu okut
+            <i>ya da</i> daveti mesajla gönder:
+            <button class="primary small" id="link-share">📤 Davet gönder</button>
+            <canvas id="link-qr"></canvas>
+          </div>
+          <div class="link-step">
+            <b>2.</b> İkinci telefonun gösterdiği kodu buraya okut <i>ya da</i> gelen cevap bağlantısına dokun:
+            <button class="small" id="link-from-clipboard">📋 Panodan yapıştır</button>
+            <video id="link-cam" playsinline muted></video>
+            <textarea id="link-paste" placeholder="…ya da kodu buraya yapıştır" rows="2"></textarea>
+          </div>
+        </div>
+        <button class="ghost" id="link-close">Kapat</button>
+      </div>
+    </div>
+    <div id="toast" class="hidden"></div>
+    <script type="module" src="./src/play.js"></script>
+  </body>
+</html>

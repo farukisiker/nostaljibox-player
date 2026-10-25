@@ -1,0 +1,20 @@
+[
+  {
+    "name": "gearsystem",
+    "extensions": ["sms", "gg", "sg", "bin"],
+    "makeoptions": { "buildpath": "./platforms/libretro/", "makescript": "Makefile", "arguments": [] },
+    "options": {},
+    "save": "srm",
+    "license": "LICENSE",
+    "repo": "https://github.com/drhelius/Gearsystem"
+  },
+  {
+    "name": "clownmdemu",
+    "extensions": ["md", "gen", "smd", "bin", "68k", "sgd"],
+    "makeoptions": { "buildpath": "./", "makescript": "Makefile", "arguments": [] },
+    "options": {},
+    "save": "srm",
+    "license": "LICENCE.txt",
+    "repo": "https://github.com/Clownacy/clownmdemu-libretro"
+  }
+]

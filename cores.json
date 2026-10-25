@@ -1,0 +1,7 @@
+{
+  "cores": [
+    "fceumm", "snes9x", "mupen64plus_next", "gambatte", "mgba", "melonds",
+    "genesis_plus_gx", "pcsx_rearmed", "stella2014", "prosystem", "mednafen_pce",
+    "fbneo", "handy", "mednafen_ngp", "mednafen_wswan", "beetle_vb"
+  ]
+}
