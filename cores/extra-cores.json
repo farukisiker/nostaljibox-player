@@ -11,7 +11,7 @@
   {
     "name": "clownmdemu",
     "extensions": ["md", "gen", "smd", "bin", "68k", "sgd"],
-    "makeoptions": { "buildpath": "./", "makescript": "Makefile", "arguments": [] },
+    "makeoptions": { "buildpath": "./", "makescript": "Makefile", "arguments": ["PLATFORM_DEFINES=-DCLOWNCD_NO_CHD"] },
     "options": {},
     "save": "srm",
     "license": "LICENCE.txt",
