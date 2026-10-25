@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT — part of nostaljibox-player/shared, usable outside the GPL player.
 import { listZipEntries } from "./unzip.js";
 
-// Consoles NostaljiBox can run. `core` is the EmulatorJS system key (see src/cores.json for the
+// Consoles NostaljiBox can run. `core` is the EmulatorJS system key (see player/cores.json for the
 // bundled libretro cores). Order is the display order in the library.
 export const SYSTEMS = [
   { core: "nes", name: "Nintendo (NES)", short: "NES", color: "#e4002b", exts: ["nes", "fds", "unf", "unif"] },
@@ -21,7 +21,6 @@ export const SYSTEMS = [
   { core: "ngp", name: "Neo Geo Pocket", short: "NGP", color: "#004b8d", exts: ["ngp", "ngc"] },
   { core: "ws", name: "WonderSwan", short: "WS", color: "#0091d0", exts: ["ws", "wsc"] },
   { core: "vb", name: "Virtual Boy", short: "VB", color: "#b5121b", exts: ["vb", "vboy"] },
-  { core: "arcade", name: "Arcade (FinalBurn Neo)", short: "ARC", color: "#f2b705", exts: [] },
 ];
 
 export const byCore = Object.fromEntries(SYSTEMS.map((s) => [s.core, s]));
@@ -79,8 +78,7 @@ export async function detectSystem(name, bytes) {
       // Multi-track discs ship as .bin files without a recognised index file.
       return { core: "psx" };
     }
-    // FinalBurn Neo romsets are zips of chip dumps with no meaningful extensions.
-    return { core: "arcade" };
+    return { core: null };
   }
   if (ext === "bin") return { core: sniffBin(bytes) };
   if (extMap.has(ext)) return { core: extMap.get(ext) };
