@@ -165,6 +165,9 @@ function buildSdp(f) {
     `m=video ${port} UDP/TLS/RTP/SAVPF ${f.pt}`, `c=IN IP4 ${ip}`, "a=rtcp:9 IN IP4 0.0.0.0", ...cand, ...transport,
     "a=mid:0", offer ? "a=sendrecv" : "a=recvonly", ...(offer ? ["a=msid:nostaljibox video"] : []),
     "a=rtcp-mux", "a=rtcp-rsize", `a=rtpmap:${f.pt} VP8/90000`, `a=rtcp-fb:${f.pt} nack`, `a=rtcp-fb:${f.pt} nack pli`,
+    // WebRTC otherwise starts at ~300 kbps and ramps up slowly, streaming 15 fps for the first
+    // seconds; on a LAN start high. Chrome reads these; other engines ignore them.
+    `a=fmtp:${f.pt} x-google-start-bitrate=4000;x-google-min-bitrate=1500;x-google-max-bitrate=6000`,
     `m=application ${port} UDP/DTLS/SCTP webrtc-datachannel`, `c=IN IP4 ${ip}`, ...cand, ...transport,
     "a=mid:1", "a=sctp-port:5000", "a=max-message-size:262144",
   ].join("\r\n") + "\r\n";
@@ -263,15 +266,32 @@ export function scanQR(video, onCode) {
   return () => (stopped = true);
 }
 
-// Raise the video bitrate: on a LAN we can afford a sharp picture.
-export async function tuneSender(sender) {
+// The emulator canvas is screen-sized (e.g. 2400×1080); games are 256–320 pixels wide, so ~800 px
+// keeps the picture sharp while the phone's encoder and the Wi-Fi keep up at 60 fps.
+const STREAM_WIDTH = 800;
+
+// Low latency over a high resolution: frame rate first, a capped encode size, LAN bitrates.
+export async function tuneSender(sender, sourceWidth) {
   try {
+    if (sender.track) sender.track.contentHint = "motion";
+    const width = sourceWidth || (sender.track && sender.track.getSettings().width) || 0;
     const p = sender.getParameters();
     p.encodings = p.encodings && p.encodings.length ? p.encodings : [{}];
     p.encodings[0].maxBitrate = 6_000_000;
     p.encodings[0].maxFramerate = 60;
+    if (width > STREAM_WIDTH) p.encodings[0].scaleResolutionDownBy = width / STREAM_WIDTH;
     p.degradationPreference = "maintain-framerate";
     await sender.setParameters(p);
+  } catch {
+    // not supported everywhere
+  }
+}
+
+// Show each frame as soon as it arrives; the default jitter buffer adds tens of milliseconds.
+export function tuneReceiver(receiver) {
+  try {
+    if ("jitterBufferTarget" in receiver) receiver.jitterBufferTarget = 0;
+    if ("playoutDelayHint" in receiver) receiver.playoutDelayHint = 0;
   } catch {
     // not supported everywhere
   }

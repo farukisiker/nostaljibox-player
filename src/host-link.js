@@ -80,7 +80,7 @@ async function start() {
 
   pc = createPeer();
   const stream = e.canvas.captureStream(60);
-  for (const track of stream.getVideoTracks()) tuneSender(pc.addTrack(track, stream));
+  for (const track of stream.getVideoTracks()) tuneSender(pc.addTrack(track, stream), e.canvas.width);
   const channel = pc.createDataChannel("input", { ordered: true });
   channel.onmessage = (m) => {
     const [btn, value] = JSON.parse(m.data);
