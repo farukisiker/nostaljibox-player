@@ -2,7 +2,7 @@
 
 `nostaljibox-player` is the open-source emulator screen and core bundle for NostaljiBox, a retro emulator app for iOS and Android.
 
-It provides the WebAssembly emulation viewport powered by [EmulatorJS](https://emulatorjs.org) (v4.2.3), loads ROMs and save states from IndexedDB, displays virtual controls and touch overlays, and coordinates local peer-to-peer 2-player streaming over WebRTC.
+It provides the WebAssembly emulation viewport powered by [EmulatorJS](https://emulatorjs.org) (v4.2.3), loads ROMs and save states from IndexedDB, displays virtual controls and touch overlays, and coordinates local peer-to-peer 2-player lockstep play over WebRTC.
 
 > **Note:** No ROMs or BIOS files are included in this repository.
 
@@ -24,7 +24,9 @@ It provides the WebAssembly emulation viewport powered by [EmulatorJS](https://e
 │   ├── systems.js         # Console definitions and ROM auto-detection
 │   └── unzip.js           # ZIP archive inspection
 ├── src/
-│   ├── host-link.js       # Host-side WebRTC screen & gamepad streaming
+│   ├── host-link.js       # Host side of two-phone play: sends the ROM and a savestate
+│   ├── guest-link.js      # Guest side: pairs by QR, receives the game, plays as player 2
+│   ├── lockstep.js        # Runs both phones frame by frame on the same inputs
 │   ├── play.css           # Viewport and HUD styles
 │   └── play.js            # Player bootstrap and EmulatorJS runtime config
 └── play.html              # Standalone player entrypoint

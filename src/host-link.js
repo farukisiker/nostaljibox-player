@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Host side of two-phone play: streams the emulator canvas to the guest phone and feeds the
-// guest's buttons into the emulator as player 2.
+// Host side of two-phone play: sends the ROM and a savestate to the guest phone, then both run
+// the game in lockstep with the guest as player 2.
 import {
-  createPeer, gatheringDone, encodeDescription, decodeDescription, drawQR, openCamera, stopCamera, scanQR, tuneSender,
+  createPeer, gatheringDone, encodeDescription, decodeDescription, drawQR, openCamera, stopCamera, scanQR,
   shareInvite, pasteCode, findCode, onInviteLink,
 } from "../shared/link.js";
+import { channelIO, Lockstep } from "./lockstep.js";
 
 const $ = (s) => document.querySelector(s);
 const panel = $("#link");
@@ -13,7 +14,8 @@ const status = $("#link-status");
 let pc = null;
 let camera = null;
 let stopScan = null;
-let held = new Set();
+let sync = null;
+let currentGame = () => null;
 
 export function toast(msg) {
   const el = $("#toast");
@@ -28,18 +30,6 @@ function emulator() {
   return e && e.gameManager && e.canvas ? e : null;
 }
 
-function press(btn, value) {
-  const e = emulator();
-  if (!e) return;
-  e.gameManager.simulateInput(1, btn, value);
-  if (value) held.add(btn);
-  else held.delete(btn);
-}
-
-function releaseAll() {
-  for (const b of [...held]) press(b, 0);
-}
-
 function closePanel() {
   panel.classList.add("hidden");
   if (stopScan) stopScan();
@@ -48,7 +38,8 @@ function closePanel() {
 }
 
 function hangUp() {
-  releaseAll();
+  if (sync) sync.detach();
+  sync = null;
   if (pc) pc.close();
   pc = null;
   document.body.classList.remove("linked");
@@ -79,17 +70,24 @@ async function start() {
   }
 
   pc = createPeer();
-  const stream = e.canvas.captureStream(60);
-  for (const track of stream.getVideoTracks()) tuneSender(pc.addTrack(track, stream), e.canvas.width);
-  const channel = pc.createDataChannel("input", { ordered: true });
-  channel.onmessage = (m) => {
-    const [btn, value] = JSON.parse(m.data);
-    press(btn, value);
-  };
+  const channel = pc.createDataChannel("link", { ordered: true });
   channel.onopen = () => {
     closePanel();
     document.body.classList.add("linked");
-    toast("2. oyuncu bağlandı 🎮");
+    toast("2. oyuncu bağlandı, oyun ona gönderiliyor…");
+    const { game, rom } = currentGame();
+    const io = channelIO(channel, (msg, bytes) => {
+      if (msg.t === "booted") sync.resync();
+      else sync.onMessage(msg, bytes);
+    });
+    sync = new Lockstep(e, io, true, (waiting) => waiting && toast("2. oyuncu bekleniyor…"));
+    sync.attach();
+    // Freeze until the guest has loaded the game and the same savestate.
+    sync.setHold(true);
+    // Library ROMs are stored as Blobs or ArrayBuffers.
+    new Blob([rom]).arrayBuffer().then((buf) =>
+      io.sendBytes({ t: "rom", name: game.name, file: game.file, core: game.core }, new Uint8Array(buf)),
+    );
   };
   channel.onclose = () => {
     if (document.body.classList.contains("linked")) toast("2. oyuncunun bağlantısı koptu");
@@ -115,7 +113,8 @@ async function start() {
   }
 }
 
-export function setupHostLink() {
+export function setupHostLink(getGame) {
+  currentGame = getGame;
   $("#p2").addEventListener("click", start);
   $("#link-close").addEventListener("click", () => {
     closePanel();

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT — part of nostaljibox-player/shared, usable outside the GPL player.
-// Two-phone play over the local network: the host phone runs the emulator and streams its
-// screen to the guest over WebRTC; the guest sends its button presses back on a data channel.
+// Two-phone play over the local network: both phones run the game and exchange button presses
+// (and, at the start, the ROM and a savestate) on a WebRTC data channel.
 // There is no server: the WebRTC offer/answer are exchanged as QR codes (or copied text).
 import QRCode from "qrcode";
 import jsQR from "jsqr";
@@ -59,12 +59,12 @@ export function minimizeSdp(sdp) {
   return out.join("\r\n") + "\r\n";
 }
 
-// ---------- compact codes (NB2) ----------
+// ---------- compact codes (NB3) ----------
 // A whole SDP made a ~100×100 QR that phone cameras could not read. Both phones build the same
-// SDP shape (one VP8 video section and one data channel, bundled), so only the per-session fields
-// travel: ICE ufrag/password, the DTLS fingerprint, the DTLS role, the VP8 payload type and the
-// host candidates (IPv4 or mDNS name). About 90 bytes, in base32 so the QR uses alphanumeric mode.
-const PREFIX2 = "NB2:";
+// SDP shape (one data channel), so only the per-session fields travel: ICE ufrag/password, the
+// DTLS fingerprint, the DTLS role and the host candidates (IPv4 or mDNS name). About 90 bytes,
+// in base32 so the QR uses alphanumeric mode. NB2 was the same for the old video-streaming SDP.
+const PREFIX3 = "NB3:";
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const SETUPS = ["actpass", "active", "passive"];
 
@@ -99,24 +99,22 @@ function sessionFields(sdp) {
   const pwd = get(/^a=ice-pwd:(\S+)/m);
   const fp = get(/^a=fingerprint:sha-256 ((?:[0-9A-F]{2}:){31}[0-9A-F]{2})\s*$/im);
   const setup = SETUPS.indexOf(get(/^a=setup:(\w+)/m));
-  const pt = Number(get(/^a=rtpmap:(\d+) VP8\/90000/im));
   const mids = [...sdp.matchAll(/^a=mid:(\S+)/gm)].map((m) => m[1]).join();
-  // Bundled, so the first section's candidates are the only ones used.
   const first = sdp.split(/^m=/m)[1] || "";
   // Host candidates are either IPv4 addresses or, before camera permission, mDNS names (<uuid>.local).
   const cands = [...first.matchAll(/^a=candidate:\S+ 1 udp \d+ (\d+\.\d+\.\d+\.\d+|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.local) (\d+) typ host/gim)]
     .map((m) => [m[1].toLowerCase(), +m[2]])
     .slice(0, 4);
-  if (!ufrag || !pwd || !fp || setup < 0 || !(pt > 0 && pt < 128) || mids !== "0,1" || !cands.length) return null;
+  if (!ufrag || !pwd || !fp || setup < 0 || mids !== "0" || !first.startsWith("application") || !cands.length) return null;
   if (ufrag.length > 255 || pwd.length > 255) return null;
-  return { ufrag, pwd, fp, setup, pt, cands };
+  return { ufrag, pwd, fp, setup, cands };
 }
 
 function packFields(type, f) {
   const enc = new TextEncoder();
   const u = enc.encode(f.ufrag), p = enc.encode(f.pwd);
   const fp = f.fp.split(":").map((h) => parseInt(h, 16));
-  const bytes = [type === "offer" ? 0 : 1, f.setup, f.pt, u.length, ...u, p.length, ...p, ...fp, f.cands.length];
+  const bytes = [type === "offer" ? 0 : 1, f.setup, u.length, ...u, p.length, ...p, ...fp, f.cands.length];
   // Each candidate: 0 + 4 address bytes, or 1 + the 16 bytes of the mDNS UUID; then the port.
   for (const [host, port] of f.cands) {
     if (host.endsWith(".local")) bytes.push(1, ...host.slice(0, -6).replace(/-/g, "").match(/../g).map((h) => parseInt(h, 16)));
@@ -131,7 +129,6 @@ function unpackFields(bytes) {
   let i = 0;
   const type = bytes[i++] === 0 ? "offer" : "answer";
   const setup = SETUPS[bytes[i++]];
-  const pt = bytes[i++];
   const ufrag = dec.decode(bytes.subarray(i + 1, i + 1 + bytes[i])); i += 1 + bytes[i];
   const pwd = dec.decode(bytes.subarray(i + 1, i + 1 + bytes[i])); i += 1 + bytes[i];
   const fp = [...bytes.subarray(i, i + 32)].map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(":"); i += 32;
@@ -150,40 +147,34 @@ function unpackFields(bytes) {
     i += 2;
   }
   if (!setup || !cands.length || i > bytes.length) throw new Error("bad code");
-  return { type, setup, pt, ufrag, pwd, fp, cands };
+  return { type, setup, ufrag, pwd, fp, cands };
 }
 
-// Rebuilds the SDP the other phone produced: host offers send video, guests answer receive-only.
+// Rebuilds the SDP the other phone produced.
 function buildSdp(f) {
   const port = f.cands[0][1];
   const ip = (f.cands.find(([h]) => !h.endsWith(".local")) || ["0.0.0.0"])[0];
   const cand = f.cands.map(([a, p], i) => `a=candidate:${i + 1} 1 udp ${2122260223 - i * 65536} ${a} ${p} typ host`);
-  const transport = [`a=ice-ufrag:${f.ufrag}`, `a=ice-pwd:${f.pwd}`, "a=ice-options:trickle", `a=fingerprint:sha-256 ${f.fp}`, `a=setup:${f.setup}`];
-  const offer = f.type === "offer";
   return [
-    "v=0", `o=- ${Date.now()} 2 IN IP4 127.0.0.1`, "s=-", "t=0 0", "a=group:BUNDLE 0 1",
-    `m=video ${port} UDP/TLS/RTP/SAVPF ${f.pt}`, `c=IN IP4 ${ip}`, "a=rtcp:9 IN IP4 0.0.0.0", ...cand, ...transport,
-    "a=mid:0", offer ? "a=sendrecv" : "a=recvonly", ...(offer ? ["a=msid:nostaljibox video"] : []),
-    "a=rtcp-mux", "a=rtcp-rsize", `a=rtpmap:${f.pt} VP8/90000`, `a=rtcp-fb:${f.pt} nack`, `a=rtcp-fb:${f.pt} nack pli`,
-    // WebRTC otherwise starts at ~300 kbps and ramps up slowly, streaming 15 fps for the first
-    // seconds; on a LAN start high. Chrome reads these; other engines ignore them.
-    `a=fmtp:${f.pt} x-google-start-bitrate=4000;x-google-min-bitrate=1500;x-google-max-bitrate=6000`,
-    `m=application ${port} UDP/DTLS/SCTP webrtc-datachannel`, `c=IN IP4 ${ip}`, ...cand, ...transport,
-    "a=mid:1", "a=sctp-port:5000", "a=max-message-size:262144",
+    "v=0", `o=- ${Date.now()} 2 IN IP4 127.0.0.1`, "s=-", "t=0 0", "a=group:BUNDLE 0",
+    `m=application ${port} UDP/DTLS/SCTP webrtc-datachannel`, `c=IN IP4 ${ip}`, ...cand,
+    `a=ice-ufrag:${f.ufrag}`, `a=ice-pwd:${f.pwd}`, "a=ice-options:trickle", `a=fingerprint:sha-256 ${f.fp}`, `a=setup:${f.setup}`,
+    "a=mid:0", "a=sctp-port:5000", "a=max-message-size:262144",
   ].join("\r\n") + "\r\n";
 }
 
 export async function encodeDescription(desc) {
   const fields = sessionFields(desc.sdp);
-  if (fields) return PREFIX2 + toBase32(packFields(desc.type, fields));
+  if (fields) return PREFIX3 + toBase32(packFields(desc.type, fields));
   // Unusual SDP (e.g. mDNS candidates): fall back to the full compressed form.
   return PREFIX + (await deflate(JSON.stringify({ t: desc.type, s: minimizeSdp(desc.sdp) })));
 }
 
 export async function decodeDescription(code) {
   code = code.trim();
-  if (code.toUpperCase().startsWith(PREFIX2)) {
-    const f = unpackFields(fromBase32(code.slice(PREFIX2.length).toUpperCase()));
+  if (/^NB2:/i.test(code)) throw new Error("Diğer telefondaki NostaljiBox eski sürüm; iki telefonu da güncelleyin.");
+  if (code.toUpperCase().startsWith(PREFIX3)) {
+    const f = unpackFields(fromBase32(code.slice(PREFIX3.length).toUpperCase()));
     return { type: f.type, sdp: buildSdp(f) };
   }
   if (!code.startsWith(PREFIX)) throw new Error("Bu bir NostaljiBox bağlantı kodu değil.");
@@ -191,7 +182,7 @@ export async function decodeDescription(code) {
   return { type: t, sdp: s };
 }
 
-const isCode = (text) => text.startsWith(PREFIX) || text.toUpperCase().startsWith(PREFIX2);
+const isCode = (text) => text.startsWith(PREFIX) || /^NB[23]:/i.test(text);
 
 // Same-network play needs no STUN/TURN; host candidates are enough.
 export function createPeer() {
@@ -266,40 +257,9 @@ export function scanQR(video, onCode) {
   return () => (stopped = true);
 }
 
-// The emulator canvas is screen-sized (e.g. 2400×1080); games are 256–320 pixels wide, so ~800 px
-// keeps the picture sharp while the phone's encoder and the Wi-Fi keep up at 60 fps.
-const STREAM_WIDTH = 800;
-
-// Low latency over a high resolution: frame rate first, a capped encode size, LAN bitrates.
-export async function tuneSender(sender, sourceWidth) {
-  try {
-    if (sender.track) sender.track.contentHint = "motion";
-    const width = sourceWidth || (sender.track && sender.track.getSettings().width) || 0;
-    const p = sender.getParameters();
-    p.encodings = p.encodings && p.encodings.length ? p.encodings : [{}];
-    p.encodings[0].maxBitrate = 6_000_000;
-    p.encodings[0].maxFramerate = 60;
-    if (width > STREAM_WIDTH) p.encodings[0].scaleResolutionDownBy = width / STREAM_WIDTH;
-    p.degradationPreference = "maintain-framerate";
-    await sender.setParameters(p);
-  } catch {
-    // not supported everywhere
-  }
-}
-
-// Show each frame as soon as it arrives; the default jitter buffer adds tens of milliseconds.
-export function tuneReceiver(receiver) {
-  try {
-    if ("jitterBufferTarget" in receiver) receiver.jitterBufferTarget = 0;
-    if ("playoutDelayHint" in receiver) receiver.playoutDelayHint = 0;
-  } catch {
-    // not supported everywhere
-  }
-}
-
 // ---------- invite links ----------
 // The same codes can travel through any messenger: "nostaljibox://join?c=…" carries the host's
-// offer, "nostaljibox://answer?c=…" the guest's reply. Only connection data is shared, never a ROM.
+// offer, "nostaljibox://answer?c=…" the guest's reply. Only connection data is in them, never a ROM.
 
 const native = () => !!window.Capacitor?.isNativePlatform?.();
 
@@ -329,7 +289,7 @@ export async function shareInvite(kind, code) {
 export function findCode(text) {
   const inv = parseInvite((/nostaljibox:\/\/\S+/i.exec(text || "") || [""])[0]);
   if (inv) return inv.code;
-  const m = /NB2:[A-Z2-7]+|NB1:[A-Za-z0-9_-]+/i.exec(text || "");
+  const m = /NB[23]:[A-Z2-7]+|NB1:[A-Za-z0-9_-]+/i.exec(text || "");
   return m ? m[0] : null;
 }
 

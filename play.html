@@ -36,6 +36,25 @@
         <button class="ghost" id="link-close">Kapat</button>
       </div>
     </div>
+    <div id="join" class="overlay hidden">
+      <div class="panel link-panel">
+        <h3>2. oyuncu olarak katıl</h3>
+        <p id="join-status">Aynı Wi-Fi'ye bağlı ana telefonda oyunu aç ve 👥 tuşuna bas.</p>
+        <div class="link-grid">
+          <div class="link-step" id="join-scan">
+            <b>1.</b> Ana telefondaki kodu okut <i>ya da</i> gelen davet bağlantısına dokun:
+            <button class="small" id="join-from-clipboard">📋 Panodan yapıştır</button>
+            <video id="join-cam" playsinline muted></video>
+            <textarea id="join-paste" placeholder="…ya da daveti buraya yapıştır" rows="2"></textarea>
+          </div>
+          <div class="link-step hidden" id="join-answer">
+            <b>2.</b> Bu kodu ana telefona okut <i>ya da</i> cevabı mesajla geri gönder:
+            <button class="primary small" id="join-share">📤 Cevabı gönder</button>
+            <canvas id="join-qr"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
     <div id="toast" class="hidden"></div>
     <script type="module" src="./src/play.js"></script>
   </body>
