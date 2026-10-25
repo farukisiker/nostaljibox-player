@@ -1,0 +1,83 @@
+name: Build GPL cores
+
+# Builds libretro cores whose licenses allow commercial (ad-supported) distribution and that the
+# EmulatorJS npm packages do not ship: bsnes (SNES, GPLv3), Gearsystem (SMS/Game Gear, GPLv3),
+# clownmdemu (Mega Drive, AGPLv3). Uses the official EmulatorJS build scripts and commits the
+# resulting .data files to cores/dist on the default branch.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/build-cores.yml, cores/extra-cores.json]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [bsnes, gearsystem, clownmdemu]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y jq p7zip-full binutils-mips-linux-gnu build-essential pkgconf python3 zip libsdl2-dev
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.74
+      # The app ships EmulatorJS 4.2.3. Newer build scripts and RetroArch (May 2026+) produce cores
+      # that require EmulatorJS 4.3.0, so pin both to the last 4.2.x-compatible revisions:
+      # build scripts 6c0dc2e (minimumEJSVersion 4.2.2), RetroArch `next` at a61f8a8905 (its head from Oct 2025 to Feb 2026).
+      # build.sh then finds RetroArch/EmulatorJS already cloned; its `git pull` on a detached HEAD
+      # fails harmlessly and leaves the pinned commits in place.
+      - name: Get EmulatorJS build scripts
+        run: |
+          git clone https://github.com/EmulatorJS/build.git ejs-build
+          git -C ejs-build checkout 6c0dc2e
+          mkdir -p ejs-build/compile
+          git clone -b next https://github.com/EmulatorJS/RetroArch.git ejs-build/compile/RetroArch
+          git -C ejs-build/compile/RetroArch checkout a61f8a8905
+          git clone -b v4.2.3 --depth 1 https://github.com/EmulatorJS/EmulatorJS.git ejs-build/compile/RetroArch/EmulatorJS
+          git -C ejs-build/compile/RetroArch/EmulatorJS checkout --detach
+          jq -s '.[0] + .[1]' ejs-build/cores.json cores/extra-cores.json > ejs-build/cores.merged.json
+          mv ejs-build/cores.merged.json ejs-build/cores.json
+      - name: Build ${{ matrix.core }}
+        working-directory: ejs-build
+        # build.sh exits 0 even when the core fails to compile, so check for its output.
+        run: |
+          bash build.sh --core=${{ matrix.core }}
+          ls -la output/*-wasm.data
+      - name: Show build log on failure
+        if: failure()
+        run: tail -n 200 ejs-build/output/logs/* 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-${{ matrix.core }}
+          path: |
+            ejs-build/output/*.data
+            ejs-build/output/reports/*.json
+
+  publish:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: built
+      - name: Commit cores
+        run: |
+          mkdir -p cores/dist/reports
+          find built -name '*-wasm.data' ! -name '*-thread-*' -exec cp {} cores/dist/ \;
+          find built -path '*reports*' -name '*.json' -exec cp {} cores/dist/reports/ \;
+          ls -la cores/dist cores/dist/reports
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cores/dist
+          git commit -m "Build GPL cores (run ${{ github.run_number }})" || { echo "nothing to commit"; exit 0; }
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

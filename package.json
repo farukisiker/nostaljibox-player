@@ -1,0 +1,30 @@
+{
+  "name": "nostaljibox-player",
+  "version": "1.0.0",
+  "private": false,
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farukisiker/nostaljibox-player"
+  },
+  "type": "module",
+  "scripts": {
+    "copy": "node scripts/copy-emulators.cjs"
+  },
+  "dependencies": {
+    "@emulatorjs/core-beetle_vb": "^4.2.3",
+    "@emulatorjs/core-fceumm": "^4.2.3",
+    "@emulatorjs/core-gambatte": "^4.2.3",
+    "@emulatorjs/core-handy": "^4.2.3",
+    "@emulatorjs/core-mednafen_ngp": "^4.2.3",
+    "@emulatorjs/core-mednafen_pce": "^4.2.3",
+    "@emulatorjs/core-mednafen_wswan": "^4.2.3",
+    "@emulatorjs/core-melonds": "^4.2.3",
+    "@emulatorjs/core-mgba": "^4.2.3",
+    "@emulatorjs/core-mupen64plus_next": "^4.2.3",
+    "@emulatorjs/core-pcsx_rearmed": "^4.2.3",
+    "@emulatorjs/core-prosystem": "^4.2.3",
+    "@emulatorjs/core-stella2014": "^4.2.3",
+    "@emulatorjs/emulatorjs": "^4.2.3"
+  }
+}
