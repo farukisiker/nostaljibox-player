@@ -44,18 +44,6 @@ jobs:
           git -C ejs-build/compile/RetroArch/EmulatorJS checkout --detach
           jq -s '.[0] + .[1]' ejs-build/cores.json cores/extra-cores.json > ejs-build/cores.merged.json
           mv ejs-build/cores.merged.json ejs-build/cores.json
-      # bsnes calls co_serializable() when saving a state, but libco's emscripten backend does not
-      # define it, so every savestate (and two-phone play) aborted the core. Returning 0 makes bsnes
-      # synchronize its threads before serializing, the path it uses on such platforms.
-      # build.sh reuses this clone; its `git pull` keeps the uncommitted line.
-      - name: Patch bsnes libco
-        if: matrix.core == 'bsnes'
-        run: |
-          git clone --depth 1 https://github.com/EmulatorJS/bsnes-libretro.git ejs-build/compile/bsnes
-          (cd ejs-build/compile/bsnes && git submodule update --init --recursive)
-          grep -q co_serializable ejs-build/compile/bsnes/libco/emscripten_fiber.c || \
-            printf '\nint co_serializable(void)\n{\n   return 0;\n}\n' >> ejs-build/compile/bsnes/libco/emscripten_fiber.c
-          tail -5 ejs-build/compile/bsnes/libco/emscripten_fiber.c
       - name: Build ${{ matrix.core }}
         working-directory: ejs-build
         # build.sh exits 0 even when the core fails to compile, so check for its output.
