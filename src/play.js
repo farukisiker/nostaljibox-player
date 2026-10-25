@@ -75,7 +75,7 @@ async function lockOrientation(core) {
     },
   });
   const script = document.createElement("script");
-  script.src = "ejs/loader.js";
+  script.src = "../ejs/loader.js";
   script.onerror = () => fail("Emülatör yüklenemedi.");
   document.body.append(script);
 })().catch((e) => fail("Hata: " + (e.message || e)));
