@@ -10,46 +10,46 @@
   <body class="play">
     <div id="game"></div>
     <div id="play-tools">
-      <button id="back" aria-label="Kütüphaneye dön">←</button>
-      <button id="p2" aria-label="2. oyuncu ekle">👥</button>
+      <button id="back" aria-label="Kütüphaneye dön" data-i18n-label="back">←</button>
+      <button id="p2" aria-label="2. oyuncu ekle" data-i18n-label="addP2">👥</button>
     </div>
     <div id="error" class="hidden"></div>
 
     <div id="link" class="overlay hidden">
       <div class="panel link-panel">
-        <h3>2. oyuncu ekle</h3>
-        <p id="link-status">Hazırlanıyor…</p>
+        <h3 data-i18n="addP2">2. oyuncu ekle</h3>
+        <p id="link-status" data-i18n="preparing">Hazırlanıyor…</p>
         <div class="link-grid">
           <div class="link-step">
-            <b>1.</b> İkinci telefonda NostaljiBox → <b>2. oyuncu olarak katıl</b>, sonra bu kodu okut
-            <i>ya da</i> daveti mesajla gönder:
-            <button class="primary small" id="link-share">📤 Davet gönder</button>
+            <span data-i18n-html="hostStep1"><b>1.</b> İkinci telefonda NostaljiBox → <b>2. oyuncu olarak katıl</b>, sonra bu kodu okut
+            <i>ya da</i> daveti mesajla gönder:</span>
+            <button class="primary small" id="link-share" data-i18n="sendInvite">📤 Davet gönder</button>
             <canvas id="link-qr"></canvas>
           </div>
           <div class="link-step">
-            <b>2.</b> İkinci telefonun gösterdiği kodu buraya okut <i>ya da</i> gelen cevap bağlantısına dokun:
-            <button class="small" id="link-from-clipboard">📋 Panodan yapıştır</button>
+            <span data-i18n-html="hostStep2"><b>2.</b> İkinci telefonun gösterdiği kodu buraya okut <i>ya da</i> gelen cevap bağlantısına dokun:</span>
+            <button class="small" id="link-from-clipboard" data-i18n="pasteFromClipboard">📋 Panodan yapıştır</button>
             <video id="link-cam" playsinline muted></video>
-            <textarea id="link-paste" placeholder="…ya da kodu buraya yapıştır" rows="2"></textarea>
+            <textarea id="link-paste" placeholder="…ya da kodu buraya yapıştır" data-i18n-placeholder="pasteCodeHere" rows="2"></textarea>
           </div>
         </div>
-        <button class="ghost" id="link-close">Kapat</button>
+        <button class="ghost" id="link-close" data-i18n="close">Kapat</button>
       </div>
     </div>
     <div id="join" class="overlay hidden">
       <div class="panel link-panel">
-        <h3>2. oyuncu olarak katıl</h3>
-        <p id="join-status">Aynı Wi-Fi'ye bağlı ana telefonda oyunu aç ve 👥 tuşuna bas.</p>
+        <h3 data-i18n="joinTitle">2. oyuncu olarak katıl</h3>
+        <p id="join-status" data-i18n="joinHint">Aynı Wi-Fi'ye bağlı ana telefonda oyunu aç ve 👥 tuşuna bas.</p>
         <div class="link-grid">
           <div class="link-step" id="join-scan">
-            <b>1.</b> Ana telefondaki kodu okut <i>ya da</i> gelen davet bağlantısına dokun:
-            <button class="small" id="join-from-clipboard">📋 Panodan yapıştır</button>
+            <span data-i18n-html="guestStep1"><b>1.</b> Ana telefondaki kodu okut <i>ya da</i> gelen davet bağlantısına dokun:</span>
+            <button class="small" id="join-from-clipboard" data-i18n="pasteFromClipboard">📋 Panodan yapıştır</button>
             <video id="join-cam" playsinline muted></video>
-            <textarea id="join-paste" placeholder="…ya da daveti buraya yapıştır" rows="2"></textarea>
+            <textarea id="join-paste" placeholder="…ya da daveti buraya yapıştır" data-i18n-placeholder="pasteInviteHere" rows="2"></textarea>
           </div>
           <div class="link-step hidden" id="join-answer">
-            <b>2.</b> Bu kodu ana telefona okut <i>ya da</i> cevabı mesajla geri gönder:
-            <button class="primary small" id="join-share">📤 Cevabı gönder</button>
+            <span data-i18n-html="guestStep2"><b>2.</b> Bu kodu ana telefona okut <i>ya da</i> cevabı mesajla geri gönder:</span>
+            <button class="primary small" id="join-share" data-i18n="sendReply">📤 Cevabı gönder</button>
             <canvas id="join-qr"></canvas>
           </div>
         </div>

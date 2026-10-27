@@ -3,7 +3,10 @@ import { byCore } from "../shared/systems.js";
 import { get, put } from "../shared/storage.js";
 import { setupHostLink } from "./host-link.js";
 import { setupGuestLink } from "./guest-link.js";
+import { t, ejsLanguage, translatePage } from "../shared/i18n.js";
 import "./play.css";
+
+translatePage();
 
 const params = new URLSearchParams(location.search);
 const id = params.get("id");
@@ -64,7 +67,7 @@ function boot(game, rom, onStart, gameId = id) {
     EJS_startOnLoaded: true,
     EJS_color: sys ? sys.color : "#e8452c",
     EJS_backgroundColor: "#000",
-    EJS_language: "tr-TR",
+    EJS_language: ejsLanguage(),
     // ROMs and cores are already local; skip EmulatorJS's own IndexedDB caches of them.
     EJS_disableDatabases: true,
     // SABR is an xBR-family edge-directed upscaler: smooths the pixel staircase while keeping
@@ -92,7 +95,7 @@ function boot(game, rom, onStart, gameId = id) {
   });
   const script = document.createElement("script");
   script.src = "../ejs/loader.js";
-  script.onerror = () => fail("Emülatör yüklenemedi.");
+  script.onerror = () => fail(t("emuLoadFailed"));
   document.body.append(script);
 }
 
@@ -104,8 +107,8 @@ if (params.has("join")) {
   (async () => {
     const game = id && (await get("games", id));
     const rom = game && (await get("roms", id));
-    if (!game || !rom) return fail("Oyun bulunamadı. Kütüphaneye dönüp tekrar ekle.");
+    if (!game || !rom) return fail(t("gameNotFound"));
     put("games", id, { ...game, played: Date.now() }).catch(() => {});
     boot(game, rom);
-  })().catch((e) => fail("Hata: " + (e.message || e)));
+  })().catch((e) => fail(t("error", { msg: e.message || e })));
 }

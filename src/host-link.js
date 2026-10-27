@@ -6,6 +6,7 @@ import {
   shareInvite, pasteCode, findCode, onInviteLink,
 } from "../shared/link.js";
 import { channelIO, Lockstep } from "./lockstep.js";
+import { t } from "../shared/i18n.js";
 
 const $ = (s) => document.querySelector(s);
 const panel = $("#link");
@@ -49,7 +50,7 @@ async function accept(code) {
   if (!pc || pc.remoteDescription) return;
   try {
     await pc.setRemoteDescription(await decodeDescription(code));
-    status.textContent = "Bağlanıyor…";
+    status.textContent = t("connecting");
   } catch (e) {
     status.textContent = e.message || String(e);
   }
@@ -57,16 +58,16 @@ async function accept(code) {
 
 async function start() {
   const e = emulator();
-  if (!e) return toast("Oyun daha yükleniyor, birazdan tekrar dene.");
+  if (!e) return toast(t("stillLoading"));
   hangUp();
   panel.classList.remove("hidden");
-  status.textContent = "Kamera açılıyor…";
+  status.textContent = t("cameraOpening");
 
   // Camera first: its permission is what exposes LAN addresses to WebRTC.
   try {
     camera = await openCamera($("#link-cam"));
   } catch {
-    status.textContent = "Kamera açılamadı; kodları kopyala/yapıştır ile değiştirebilirsin.";
+    status.textContent = t("hostNoCamera");
   }
 
   pc = createPeer();
@@ -74,13 +75,13 @@ async function start() {
   channel.onopen = () => {
     closePanel();
     document.body.classList.add("linked");
-    toast("2. oyuncu bağlandı, oyun ona gönderiliyor…");
+    toast(t("p2Connected"));
     const { game, rom } = currentGame();
     const io = channelIO(channel, (msg, bytes) => {
       if (msg.t === "booted") sync.resync();
       else sync.onMessage(msg, bytes);
     });
-    sync = new Lockstep(e, io, true, (waiting) => waiting && toast("2. oyuncu bekleniyor…"));
+    sync = new Lockstep(e, io, true, (waiting) => waiting && toast(t("waitingP2")));
     sync.attach();
     // Freeze until the guest has loaded the game and the same savestate.
     sync.setHold(true);
@@ -90,12 +91,12 @@ async function start() {
     );
   };
   channel.onclose = () => {
-    if (document.body.classList.contains("linked")) toast("2. oyuncunun bağlantısı koptu");
+    if (document.body.classList.contains("linked")) toast(t("p2Left"));
     hangUp();
   };
   pc.onconnectionstatechange = () => {
     if (pc && pc.connectionState === "failed") {
-      status.textContent = "Bağlantı kurulamadı. İki telefon aynı Wi-Fi ağında mı?";
+      status.textContent = t("connectFailed");
     }
   };
 
@@ -105,10 +106,10 @@ async function start() {
   await drawQR($("#link-qr"), code);
   $("#link-share").onclick = () =>
     shareInvite("join", code)
-      .then((r) => r && r.copied && toast("Davet panoya kopyalandı"))
+      .then((r) => r && r.copied && toast(t("inviteCopied")))
       .catch(() => {});
   if (camera) {
-    status.textContent = "Kodu ikinci telefona okut, sonra onun gösterdiği kodu bu kameraya göster.";
+    status.textContent = t("hostScanHint");
     stopScan = scanQR($("#link-cam"), accept);
   }
 }
@@ -127,12 +128,12 @@ export function setupHostLink(getGame) {
   $("#link-from-clipboard").addEventListener("click", async () => {
     const code = await pasteCode().catch(() => null);
     if (code) accept(code);
-    else toast("Panoda bağlantı kodu yok");
+    else toast(t("noLinkCode"));
   });
   // The guest's reply can also arrive as a nostaljibox://answer link from a messenger.
   onInviteLink(({ kind, code }) => {
-    if (kind !== "answer") return toast("Bu bir katılma daveti; ana telefonda 👥 ile davet oluştur.");
-    if (!pc) return toast("Önce 👥 ile davet oluştur.");
+    if (kind !== "answer") return toast(t("thisIsInvite"));
+    if (!pc) return toast(t("createInviteFirst"));
     panel.classList.remove("hidden");
     accept(code);
   });

@@ -7,6 +7,7 @@ import {
 } from "../shared/link.js";
 import { channelIO, Lockstep } from "./lockstep.js";
 import { toast } from "./host-link.js";
+import { t } from "../shared/i18n.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -25,25 +26,25 @@ export function setupGuestLink(boot) {
     const io = channelIO(channel, (msg, bytes) => {
       if (msg.t === "rom") {
         $("#join").classList.add("hidden");
-        toast("Oyun yükleniyor…");
+        toast(t("loadingGame"));
         boot({ name: msg.name, file: msg.file, core: msg.core }, new Blob([bytes]), (emu) => {
-          sync = new Lockstep(emu, io, false, (waiting) => waiting && toast("Ana telefon bekleniyor…"));
+          sync = new Lockstep(emu, io, false, (waiting) => waiting && toast(t("waitingHost")));
           sync.attach();
           sync.setHold(true);
           io.send({ t: "booted" });
           document.body.classList.add("linked");
-          toast("Bağlandın — sen 2. oyuncusun 🎮");
+          toast(t("youArePlayer2"));
         });
       } else if (sync) {
         sync.onMessage(msg, bytes);
       }
     });
-    status.textContent = "Bağlandı, oyun ana telefondan alınıyor…";
+    status.textContent = t("receivingGame");
     channel.onclose = () => {
       if (sync) sync.detach();
       sync = null;
       if (window.EJS_emulator && window.EJS_emulator.pause) window.EJS_emulator.pause();
-      toast("Ana telefonla bağlantı koptu");
+      toast(t("hostLeft"));
       setTimeout(() => (location.href = "../index.html"), 2500);
     };
   }
@@ -53,11 +54,11 @@ export function setupGuestLink(boot) {
     if (stopScan) stopScan();
     try {
       const offer = await decodeDescription(code);
-      status.textContent = "Bağlantı hazırlanıyor…";
+      status.textContent = t("preparingConnection");
       pc = createPeer();
       pc.ondatachannel = (ev) => onChannel(ev.channel);
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed") status.textContent = "Bağlantı kurulamadı. İki telefon aynı Wi-Fi ağında mı?";
+        if (pc.connectionState === "failed") status.textContent = t("connectFailed");
       };
       await pc.setRemoteDescription(offer);
       await pc.setLocalDescription(await pc.createAnswer());
@@ -69,9 +70,9 @@ export function setupGuestLink(boot) {
       await drawQR($("#join-qr"), answer);
       $("#join-share").onclick = () =>
         shareInvite("answer", answer)
-          .then((r) => r && r.copied && toast("Cevap panoya kopyalandı"))
+          .then((r) => r && r.copied && toast(t("replyCopied")))
           .catch(() => {});
-      status.textContent = "Şimdi bu kodu ana telefonun kamerasına göster ya da cevabı mesajla geri gönder.";
+      status.textContent = t("showReplyHint");
     } catch (e) {
       status.textContent = e.message || String(e);
       pc = null;
@@ -85,11 +86,11 @@ export function setupGuestLink(boot) {
   $("#join-from-clipboard").addEventListener("click", async () => {
     const code = await pasteCode().catch(() => null);
     if (code) onOffer(code);
-    else toast("Panoda davet kodu yok");
+    else toast(t("noInviteCode"));
   });
   onInviteLink(({ kind, code }) => {
     if (kind === "join") onOffer(code);
-    else toast("Bu bir cevap kodu; ana telefonda açılmalı.");
+    else toast(t("thisIsReply"));
   });
 
   (async () => {
@@ -100,7 +101,7 @@ export function setupGuestLink(boot) {
       camera = stream;
       stopScan = scanQR($("#join-cam"), onOffer);
     } catch {
-      status.textContent = "Kamera açılamadı; ana telefondaki kodu kopyalayıp aşağıya yapıştır.";
+      status.textContent = t("guestNoCamera");
     }
   })();
 

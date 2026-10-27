@@ -7,6 +7,7 @@ import jsQR from "jsqr";
 import { Share } from "@capacitor/share";
 import { Clipboard } from "@capacitor/clipboard";
 import { App } from "@capacitor/app";
+import { t } from "./i18n.js";
 
 const PREFIX = "NB1:";
 
@@ -172,12 +173,12 @@ export async function encodeDescription(desc) {
 
 export async function decodeDescription(code) {
   code = code.trim();
-  if (/^NB2:/i.test(code)) throw new Error("Diğer telefondaki NostaljiBox eski sürüm; iki telefonu da güncelleyin.");
+  if (/^NB2:/i.test(code)) throw new Error(t("oldVersion"));
   if (code.toUpperCase().startsWith(PREFIX3)) {
     const f = unpackFields(fromBase32(code.slice(PREFIX3.length).toUpperCase()));
     return { type: f.type, sdp: buildSdp(f) };
   }
-  if (!code.startsWith(PREFIX)) throw new Error("Bu bir NostaljiBox bağlantı kodu değil.");
+  if (!code.startsWith(PREFIX)) throw new Error(t("notACode"));
   const { t, s } = JSON.parse(await inflate(code.slice(PREFIX.length)));
   return { type: t, sdp: s };
 }
@@ -277,10 +278,10 @@ export async function shareInvite(kind, code) {
   const link = inviteUrl(kind, code);
   const text =
     kind === "join"
-      ? `🎮 NostaljiBox'ta 2. oyuncu olmaya davet edildin!\nAçmak için dokun: ${link}\n\nAçılmazsa bu mesajı kopyala, NostaljiBox → "2. oyuncu olarak katıl" → "Panodan yapıştır".`
-      : `🎮 NostaljiBox: 2. oyuncu hazır.\nBağlanmak için dokun: ${link}\n\nAçılmazsa bu mesajı kopyala, oyundaki 👥 ekranında "Panodan yapıştır".`;
-  if (native()) return Share.share({ title: "NostaljiBox daveti", text, dialogTitle: "Davet gönder" });
-  if (navigator.share) return navigator.share({ title: "NostaljiBox daveti", text });
+      ? t("inviteMessage", { link })
+      : t("replyMessage", { link });
+  if (native()) return Share.share({ title: t("inviteTitle"), text, dialogTitle: t("inviteTitle") });
+  if (navigator.share) return navigator.share({ title: t("inviteTitle"), text });
   await navigator.clipboard.writeText(text);
   return { copied: true };
 }
