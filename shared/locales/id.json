@@ -44,6 +44,7 @@
   "hostNoCamera": "Kamera tidak bisa dibuka; kamu bisa bertukar kode dengan salin dan tempel.",
   "p2Connected": "Pemain 2 terhubung, mengirim game…",
   "p2Left": "Pemain 2 terputus",
+  "p2AlreadyConnected": "Pemain 2 sudah terhubung",
   "connectFailed": "Gagal terhubung. Apakah kedua HP ada di Wi-Fi yang sama?",
   "inviteCopied": "Undangan disalin ke papan klip",
   "hostScanHint": "Pindai kode ini dengan HP kedua, lalu tunjukkan kodenya ke kamera ini.",

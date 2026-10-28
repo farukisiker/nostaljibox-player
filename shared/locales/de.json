@@ -44,6 +44,7 @@
   "hostNoCamera": "Kamera konnte nicht geöffnet werden; du kannst die Codes per Kopieren und Einfügen austauschen.",
   "p2Connected": "Spieler 2 verbunden, Spiel wird gesendet…",
   "p2Left": "Spieler 2 hat die Verbindung getrennt",
+  "p2AlreadyConnected": "Spieler 2 ist bereits verbunden",
   "connectFailed": "Verbindung fehlgeschlagen. Sind beide Handys im selben Wi-Fi?",
   "inviteCopied": "Einladung in die Zwischenablage kopiert",
   "hostScanHint": "Scanne diesen Code mit dem zweiten Handy und zeig dann dessen Code dieser Kamera.",

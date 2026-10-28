@@ -44,6 +44,7 @@
   "hostNoCamera": "Kamera açılamadı; kodları kopyala/yapıştır ile değiştirebilirsin.",
   "p2Connected": "2. oyuncu bağlandı, oyun ona gönderiliyor…",
   "p2Left": "2. oyuncunun bağlantısı koptu",
+  "p2AlreadyConnected": "2. oyuncu zaten bağlı",
   "connectFailed": "Bağlantı kurulamadı. İki telefon aynı Wi-Fi ağında mı?",
   "inviteCopied": "Davet panoya kopyalandı",
   "hostScanHint": "Kodu ikinci telefona okut, sonra onun gösterdiği kodu bu kameraya göster.",

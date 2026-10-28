@@ -59,6 +59,8 @@ async function accept(code) {
 async function start() {
   const e = emulator();
   if (!e) return toast(t("stillLoading"));
+  // The button stays on screen during two-phone play; a stray tap must not cut player 2 off.
+  if (sync) return toast(t("p2AlreadyConnected"));
   hangUp();
   panel.classList.remove("hidden");
   status.textContent = t("cameraOpening");

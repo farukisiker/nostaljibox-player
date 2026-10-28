@@ -308,18 +308,22 @@ export async function onInviteLink(handler) {
     handler(fromHash);
   }
   if (!native()) return;
+  // getLaunchUrl keeps returning the last link that opened the app (iOS updates it even when the
+  // app was already running), so every later visit to the library would handle that invite again
+  // and reopen the camera. Remember handled codes in localStorage, which also survives restarts;
+  // each code holds a one-time WebRTC offer, so it is never useful twice.
+  const seen = (inv) => localStorage.getItem("handled:" + inv.code);
+  const mark = (inv) => localStorage.setItem("handled:" + inv.code, "1");
   App.addListener("appUrlOpen", ({ url }) => {
     const inv = parseInvite(url);
-    if (inv) handler(inv);
+    if (!inv) return;
+    mark(inv);
+    handler(inv);
   });
   const launch = await App.getLaunchUrl().catch(() => null);
   const inv = launch && parseInvite(launch.url);
-  // The launch link stays the same after the app or its web view restarts, which also clears
-  // sessionStorage; remember handled codes in localStorage so an old invite doesn't reopen the camera.
-  // Each code holds a one-time WebRTC offer, so it is never useful twice.
-  const key = "handled:" + (inv && inv.code);
-  if (inv && !localStorage.getItem(key)) {
-    localStorage.setItem(key, "1");
+  if (inv && !seen(inv)) {
+    mark(inv);
     handler(inv);
   }
 }

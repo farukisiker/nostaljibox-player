@@ -44,6 +44,7 @@
   "hostNoCamera": "无法打开相机；你可以通过复制粘贴来交换代码。",
   "p2Connected": "玩家 2 已连接，正在发送游戏…",
   "p2Left": "玩家 2 已断开连接",
+  "p2AlreadyConnected": "玩家 2 已连接",
   "connectFailed": "无法连接。两部手机是否连接到同一个 Wi-Fi？",
   "inviteCopied": "邀请已复制到剪贴板",
   "hostScanHint": "用第二部手机扫描此二维码，然后把它显示的二维码对准这个相机。",
