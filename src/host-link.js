@@ -26,6 +26,33 @@ export function toast(msg) {
   toast._t = setTimeout(() => el.classList.add("hidden"), 2500);
 }
 
+// The toolbar sits where a thumb rests in landscape, and a stray tap on it used to end two-phone
+// play, so its buttons only act after being held down.
+const HOLD_MS = 600;
+export function onHold(el, fn) {
+  let timer = null;
+  const cancel = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+    el.classList.remove("holding");
+    toast(t("holdToUse"));
+  };
+  el.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    el.classList.add("holding");
+    timer = setTimeout(() => {
+      timer = null;
+      el.classList.remove("holding");
+      fn();
+    }, HOLD_MS);
+  });
+  el.addEventListener("pointerup", cancel);
+  el.addEventListener("pointercancel", cancel);
+  el.addEventListener("pointerleave", cancel);
+  el.addEventListener("contextmenu", (ev) => ev.preventDefault());
+}
+
 function emulator() {
   const e = window.EJS_emulator;
   return e && e.gameManager && e.canvas ? e : null;
@@ -118,7 +145,7 @@ async function start() {
 
 export function setupHostLink(getGame) {
   currentGame = getGame;
-  $("#p2").addEventListener("click", start);
+  onHold($("#p2"), start);
   $("#link-close").addEventListener("click", () => {
     closePanel();
     if (pc && pc.connectionState !== "connected") hangUp();

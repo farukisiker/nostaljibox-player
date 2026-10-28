@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { byCore } from "../shared/systems.js";
 import { get, put } from "../shared/storage.js";
-import { setupHostLink } from "./host-link.js";
+import { setupHostLink, onHold } from "./host-link.js";
 import { setupGuestLink } from "./guest-link.js";
 import { t, ejsLanguage, translatePage } from "../shared/i18n.js";
 import "./play.css";
@@ -57,7 +57,7 @@ function fail(msg) {
   errorEl.classList.remove("hidden");
 }
 
-document.getElementById("back").addEventListener("click", () => {
+onHold(document.getElementById("back"), () => {
   location.href = "../index.html?from=game";
 });
 

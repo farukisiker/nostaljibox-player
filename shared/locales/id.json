@@ -45,6 +45,7 @@
   "p2Connected": "Pemain 2 terhubung, mengirim game…",
   "p2Left": "Pemain 2 terputus",
   "p2AlreadyConnected": "Pemain 2 sudah terhubung",
+  "holdToUse": "Tekan dan tahan untuk memakai",
   "connectFailed": "Gagal terhubung. Apakah kedua HP ada di Wi-Fi yang sama?",
   "inviteCopied": "Undangan disalin ke papan klip",
   "hostScanHint": "Pindai kode ini dengan HP kedua, lalu tunjukkan kodenya ke kamera ini.",

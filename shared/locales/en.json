@@ -45,6 +45,7 @@
   "p2Connected": "Player 2 connected, sending them the game…",
   "p2Left": "Player 2 disconnected",
   "p2AlreadyConnected": "Player 2 is already connected",
+  "holdToUse": "Press and hold to use",
   "connectFailed": "Couldn't connect. Are both phones on the same Wi-Fi?",
   "inviteCopied": "Invite copied to the clipboard",
   "hostScanHint": "Scan this code with the second phone, then show its code to this camera.",

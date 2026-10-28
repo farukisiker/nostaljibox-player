@@ -45,6 +45,7 @@
   "p2Connected": "Giocatore 2 connesso, invio del gioco…",
   "p2Left": "Giocatore 2 disconnesso",
   "p2AlreadyConnected": "Il giocatore 2 è già connesso",
+  "holdToUse": "Tieni premuto per usare",
   "connectFailed": "Connessione non riuscita. I due telefoni sono sulla stessa rete Wi-Fi?",
   "inviteCopied": "Invito copiato negli appunti",
   "hostScanHint": "Scansiona questo codice con il secondo telefono, poi mostra il suo codice a questa fotocamera.",
