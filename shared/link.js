@@ -314,8 +314,12 @@ export async function onInviteLink(handler) {
   });
   const launch = await App.getLaunchUrl().catch(() => null);
   const inv = launch && parseInvite(launch.url);
-  if (inv && !sessionStorage.getItem("handled:" + inv.code)) {
-    sessionStorage.setItem("handled:" + inv.code, "1");
+  // The launch link stays the same after the app or its web view restarts, which also clears
+  // sessionStorage; remember handled codes in localStorage so an old invite doesn't reopen the camera.
+  // Each code holds a one-time WebRTC offer, so it is never useful twice.
+  const key = "handled:" + (inv && inv.code);
+  if (inv && !localStorage.getItem(key)) {
+    localStorage.setItem(key, "1");
     handler(inv);
   }
 }
