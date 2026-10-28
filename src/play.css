@@ -163,6 +163,37 @@ body.linked #p2 {
   background: #1fbf5f;
   opacity: 0.9;
 }
+/* On-screen controls: larger and see-through so the picture shows behind them. */
+/* Not scaled with a transform: the sliding stick measures its centre from the untransformed box. */
+#game .ejs_virtualGamepad_left {
+  width: 175px;
+  height: 175px;
+}
+#game .ejs_virtualGamepad_right {
+  transform: scale(1.4);
+  transform-origin: bottom right;
+}
+#game .ejs_virtualGamepad_button {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.75);
+}
+#game .ejs_virtualGamepad_button_down {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+#game .ejs_dpad_main {
+  opacity: 0.45;
+}
+/* The sliding stick reacts anywhere in a wide area around it, not just on the knob. */
+#game .ejs_virtualGamepad_left .b_dpad {
+  position: absolute;
+  inset: -30px;
+  touch-action: none;
+}
+#game .b_dpad .nipple {
+  opacity: 0.6;
+  transform: scale(1.6);
+}
 #error {
   position: fixed;
   inset: 0;

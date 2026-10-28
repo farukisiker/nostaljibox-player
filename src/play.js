@@ -14,6 +14,41 @@ const BROKEN_SHADERS = ["2xScaleHQ.glslp", "4xScaleHQ.glslp"];
 // bsnes switches emscripten fibers while serializing, which crashes the core when a savestate is
 // taken from JavaScript. Without savestates there are no save/load buttons and no two-phone play.
 const NO_STATES = ["snes"];
+// Two-button consoles get a sliding stick instead of the cross pad, plus a button that presses
+// both. Input ids follow EmulatorJS: the two buttons are 0 and 8, directions 4-7.
+// `left`/`right` label the 0 and 8 buttons; `center` lists [text, input id, offset] pairs.
+function twoButtonPad(left, right, combo, center) {
+  return [
+    { type: "zone", id: "dpad", location: "left", left: "50%", top: "50%", joystickInput: false, inputValues: [4, 5, 6, 7], color: "#ffffff" },
+    { type: "button", text: left, id: "b", location: "right", right: 75, top: 70, bold: true, input_value: 0 },
+    { type: "button", text: right, id: "a", location: "right", right: 5, top: 70, bold: true, input_value: 8 },
+    // EmulatorJS presses button 8 for this one; bindComboButton adds button 0.
+    { type: "button", text: combo, id: "ab", location: "right", right: 40, top: 5, bold: true, fontSize: 18, input_value: 8 },
+    ...center.map(([text, value, offset]) => ({ type: "button", text, id: text.toLowerCase().replace(/\W+/g, "_"), location: "center", left: offset, fontSize: 15, block: true, input_value: value })),
+  ];
+}
+const START_SELECT = [["Start", 3, 60], ["Select", 2, -5]];
+const PADS = {
+  nes: twoButtonPad("B", "A", "A+B", START_SELECT),
+  gb: twoButtonPad("B", "A", "A+B", START_SELECT),
+  segaMS: twoButtonPad("1", "2", "1+2", []),
+  segaGG: twoButtonPad("1", "2", "1+2", [["Start", 3, 30]]),
+  pce: twoButtonPad("II", "I", "I+II", [["Run", 3, 60], ["Select", 2, -5]]),
+  atari7800: twoButtonPad("1", "2", "1+2", [["Reset", 9, -35], ["Select", 2, 30], ["Pause", 3, 95]]),
+  lynx: twoButtonPad("B", "A", "A+B", [["Opt 1", 10, -35], ["Start", 3, 30], ["Opt 2", 11, 95]]),
+  ngp: twoButtonPad("A", "B", "A+B", [["Option", 3, 30]]),
+};
+
+function bindComboButton(emu) {
+  const el = document.querySelector(".ejs_virtualGamepad_button.b_ab");
+  if (!el) return;
+  // Button 8 comes from EmulatorJS; add button 0. Look the game manager up on each touch:
+  // two-phone play wraps simulateInput after start.
+  el.addEventListener("touchstart", () => emu.gameManager.simulateInput(0, 0, 1));
+  const release = () => setTimeout(() => emu.gameManager.simulateInput(0, 0, 0));
+  el.addEventListener("touchend", release);
+  el.addEventListener("touchcancel", release);
+}
 const errorEl = document.getElementById("error");
 let current = null;
 
@@ -74,6 +109,7 @@ function boot(game, rom, onStart, gameId = id) {
     // edges sharp. Players can switch it in the menu (Ayarlar > Tonlayıcılar).
     EJS_defaultOptions: { shader: "sabr" },
     ...(noStates && { EJS_Buttons: { saveState: false, loadState: false } }),
+    ...(PADS[game.core] && { EJS_VirtualGamepadSettings: PADS[game.core] }),
     // "ready" fires before the core is downloaded, i.e. before RetroArch reads its config.
     EJS_ready: () => {
       const proto = window.EJS_GameManager.prototype;
@@ -90,6 +126,7 @@ function boot(game, rom, onStart, gameId = id) {
     EJS_onGameStart: () => {
       const emu = window.EJS_emulator;
       if (BROKEN_SHADERS.includes(emu.getSettingValue("shader"))) emu.changeSettingOption("shader", "sabr");
+      bindComboButton(emu);
       if (onStart) onStart(emu);
     },
   });
