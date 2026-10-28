@@ -136,7 +136,12 @@ function boot(game, rom, onStart, gameId = id) {
   document.body.append(script);
 }
 
-if (params.has("join")) {
+const reloaded = performance.getEntriesByType("navigation")[0]?.type === "reload";
+if (params.has("join") && reloaded) {
+  // iOS reloads the page when it kills the web view's process; the link to the host is gone by
+  // then, so go back to the library instead of reopening the camera to join again.
+  location.replace("../index.html");
+} else if (params.has("join")) {
   // Second phone: the game comes from the host phone over the link.
   setupGuestLink((game, rom, onStart) => boot(game, rom, onStart, "nostaljibox-link"));
 } else {

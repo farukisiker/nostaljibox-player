@@ -201,9 +201,19 @@ export class Lockstep {
     this.gate();
   }
 
+  // EmulatorJS's getState never frees the buffer the core writes the savestate into, so every call
+  // leaks a whole savestate. Taken every few seconds, that ran phones out of memory mid-game.
+  getState() {
+    const [size, start, ok] = this.raw.saveStateInfo().split("|");
+    if (ok !== "1") throw new Error(size);
+    const state = this.gm.Module.HEAPU8.slice(+start, +start + +size);
+    this.gm.Module._free(+start);
+    return state;
+  }
+
   // Both phones hash their savestate on the same frame; the host compares and resyncs on a mismatch.
   check(f) {
-    const state = this.gm.getState();
+    const state = this.getState();
     // Same game on both phones, so both switch to the longer interval on the same frame.
     if (state.length > BIG_STATE) this.checkEvery = CHECK_BIG_EVERY;
     const h = hash(state, this.mask);
@@ -229,7 +239,7 @@ export class Lockstep {
     this.active = false;
     this.setHold(true);
     this.epoch++;
-    this.io.sendBytes({ t: "state", epoch: this.epoch, applied: this.applied }, this.gm.getState());
+    this.io.sendBytes({ t: "state", epoch: this.epoch, applied: this.applied }, this.getState());
   }
 
   onMessage(msg, bytes) {
@@ -266,7 +276,7 @@ export class Lockstep {
     const sent = this.loading;
     this.loading = null;
     this.setHold(true);
-    const now = this.gm.getState();
+    const now = this.getState();
     const mask = [];
     for (let i = 0; i < now.length && mask.length <= MAX_MASK; i++) if (now[i] !== sent[i]) mask.push(i);
     this.mask = now.length === sent.length && mask.length <= MAX_MASK ? mask : null;
