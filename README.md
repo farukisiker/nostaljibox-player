@@ -65,7 +65,7 @@ All bundled cores permit commercial distribution:
 | bsnes | Super Nintendo | GPLv3 | https://github.com/libretro/bsnes |
 | Gearsystem | Master System / Game Gear | GPLv3 | https://github.com/drhelius/Gearsystem |
 | clownmdemu | Sega Mega Drive / Genesis | AGPLv3 | https://github.com/Clownacy/clownmdemu-libretro |
-| fceumm | NES / Famicom | GPLv2 | `@emulatorjs/core-fceumm` |
+| nestopia | NES / Famicom | GPLv2 | `@emulatorjs/core-nestopia` |
 | mupen64plus_next | Nintendo 64 | GPLv2 | `@emulatorjs/core-mupen64plus_next` |
 | gambatte | Game Boy / Color | GPLv2 | `@emulatorjs/core-gambatte` |
 | mgba | Game Boy Advance | MPL-2.0 | `@emulatorjs/core-mgba` |

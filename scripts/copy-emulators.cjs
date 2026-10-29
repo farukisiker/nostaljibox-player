@@ -45,6 +45,8 @@ let bundle = order.map((f) => fs.readFileSync(path.join(out, "src", f), "utf8"))
 
 // Point systems at the commercially licensed cores we ship instead of EmulatorJS's defaults.
 const coreMap = {
+  // fceumm makes iOS reload the game page mid-play (seen on an iPhone XR); nestopia runs fine.
+  '"nes": ["fceumm", "nestopia"]': '"nes": ["nestopia"]',
   '"snes": ["snes9x"]': '"snes": ["bsnes"]',
   '"segaMS": ["smsplus", "genesis_plus_gx", "picodrive"]': '"segaMS": ["gearsystem"]',
   '"segaMD": ["genesis_plus_gx", "picodrive"]': '"segaMD": ["clownmdemu"]',

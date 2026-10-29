@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@emulatorjs/core-beetle_vb": "^4.2.3",
-    "@emulatorjs/core-fceumm": "^4.2.3",
+    "@emulatorjs/core-nestopia": "^4.2.3",
     "@emulatorjs/core-gambatte": "^4.2.3",
     "@emulatorjs/core-handy": "^4.2.3",
     "@emulatorjs/core-mednafen_ngp": "^4.2.3",
