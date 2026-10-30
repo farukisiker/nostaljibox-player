@@ -16,5 +16,14 @@
     "save": "srm",
     "license": "LICENCE.txt",
     "repo": "https://github.com/Clownacy/clownmdemu-libretro"
+  },
+  {
+    "name": "mesen-s",
+    "extensions": ["smc", "sfc", "swc", "fig", "bs"],
+    "makeoptions": { "buildpath": "./Libretro", "makescript": "Makefile", "arguments": [] },
+    "options": {},
+    "save": "srm",
+    "license": "LICENSE",
+    "repo": "https://github.com/libretro/Mesen-S"
   }
 ]
