@@ -48,6 +48,23 @@ jobs:
           git -C ejs-build/compile/RetroArch/EmulatorJS checkout --detach
           jq -s '.[0] + .[1]' ejs-build/cores.json cores/extra-cores.json > ejs-build/cores.merged.json
           mv ejs-build/cores.merged.json ejs-build/cores.json
+      # Mesen-S bundles its own copy of the 7-Zip SDK, which clashes with RetroArch's when the core
+      # is linked into the frontend. Prefix every symbol of Mesen-S's copy; build.sh then finds the
+      # patched checkout already cloned.
+      - name: Rename Mesen-S's 7-Zip symbols
+        if: matrix.core == 'mesen-s'
+        working-directory: ejs-build/compile
+        run: |
+          git clone --depth 1 https://github.com/libretro/Mesen-S.git mesen-s
+          cd mesen-s/SevenZip
+          mkdir -p /tmp/7z
+          for f in *.c; do emcc -c -D LIBRETRO "$f" -o "/tmp/7z/${f%.c}.o"; done
+          "$(dirname "$(which emcc)")/../bin/llvm-nm" --defined-only --extern-only /tmp/7z/*.o \
+            | awk 'NF == 3 { print $3 }' | sort -u | awk '{ print "#define " $1 " mesens_" $1 }' > mesens-7z-rename.h
+          wc -l mesens-7z-rename.h
+          cd ../Libretro
+          sed -i 's|^CFLAGS   += -D LIBRETRO $(fpic)|& -include $(CURDIR)/../SevenZip/mesens-7z-rename.h|; s|^CXXFLAGS += -D LIBRETRO $(fpic) -std=c++11|& -include $(CURDIR)/../SevenZip/mesens-7z-rename.h|' Makefile
+          grep -c mesens-7z-rename Makefile | grep -qx 2
       - name: Build ${{ matrix.core }}
         working-directory: ejs-build
         # build.sh exits 0 even when the core fails to compile, so check for its output.
