@@ -10,8 +10,12 @@
   <body class="play">
     <div id="game"></div>
     <div id="play-tools">
-      <button id="back" aria-label="Kütüphaneye dön" data-i18n-label="back">←</button>
-      <button id="p2" aria-label="2. oyuncu ekle" data-i18n-label="addP2">👥</button>
+      <button id="tools-toggle" aria-label="Menü" data-i18n-label="tools">☰</button>
+      <div id="tools-panel" class="hidden">
+        <button id="back"><span>←</span> <span data-i18n="back">Kütüphaneye dön</span></button>
+        <button id="p2"><span>👥</span> <span data-i18n="addP2">2. oyuncu ekle</span></button>
+        <button id="emu-menu"><span>⚙</span> <span data-i18n="emuMenu">Oyun menüsü</span></button>
+      </div>
     </div>
     <div id="error" class="hidden"></div>
 

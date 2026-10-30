@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { byCore } from "../shared/systems.js";
 import { get, put } from "../shared/storage.js";
-import { setupHostLink, onHold } from "./host-link.js";
+import { setupHostLink } from "./host-link.js";
 import { setupGuestLink } from "./guest-link.js";
 import { t, ejsLanguage, translatePage } from "../shared/i18n.js";
 import "./play.css";
@@ -92,8 +92,25 @@ function fail(msg) {
   errorEl.classList.remove("hidden");
 }
 
-onHold(document.getElementById("back"), () => {
+// One button in the top corner opens a panel with the toolbar's actions, so a stray tap during
+// play can't leave the game or end two-phone play.
+const toolsPanel = document.getElementById("tools-panel");
+const closeTools = () => toolsPanel.classList.add("hidden");
+document.getElementById("tools-toggle").addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  toolsPanel.classList.toggle("hidden");
+});
+toolsPanel.addEventListener("click", closeTools);
+document.addEventListener("pointerdown", (ev) => {
+  if (!ev.target.closest("#play-tools")) closeTools();
+});
+document.getElementById("back").addEventListener("click", () => {
   location.href = "../index.html?from=game";
+});
+// EmulatorJS's own bottom menu bar; its corner button is hidden in play.css.
+document.getElementById("emu-menu").addEventListener("click", () => {
+  const emu = window.EJS_emulator;
+  if (emu && emu.menu) emu.menu.toggle();
 });
 
 async function lockOrientation(core) {
