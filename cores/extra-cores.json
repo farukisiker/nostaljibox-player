@@ -20,7 +20,7 @@
   {
     "name": "mesen-s",
     "extensions": ["smc", "sfc", "swc", "fig", "bs"],
-    "makeoptions": { "buildpath": "./Libretro", "makescript": "Makefile", "arguments": [] },
+    "makeoptions": { "buildpath": "./Libretro", "makescript": "Makefile", "arguments": ["SHARED=-r"] },
     "options": {},
     "save": "srm",
     "license": "LICENSE",
