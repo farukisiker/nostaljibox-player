@@ -104,16 +104,16 @@ async function start() {
   inbox = await listenForAnswer((ufrag, code) => {
     if (pc && pc.localDescription && ufrag === iceUfrag(pc.localDescription.sdp)) accept(code);
   });
-  if (!inbox.info) {
-    status.textContent = t("cameraOpening");
-    // Camera first: its permission is what exposes LAN addresses to WebRTC.
-    try {
-      camera = await openCamera($("#link-cam"));
-    } catch {
-      status.textContent = t("hostNoCamera");
-    }
+  status.textContent = t("cameraOpening");
+  // Camera first, even when nothing is scanned here: while it runs, iOS and Android let WebRTC use
+  // the phone's LAN address, and without that the phones never connect. It stays on (hidden when
+  // the reply comes over the Wi-Fi) until the guest is connected.
+  try {
+    camera = await openCamera($("#link-cam"));
+  } catch {
+    status.textContent = t("hostNoCamera");
   }
-  $("#link-cam").classList.toggle("hidden", !camera);
+  $("#link-cam").classList.toggle("hidden", !camera || !!inbox.info);
   $("#link-scan").classList.add("hidden");
 
   pc = createPeer();
@@ -159,15 +159,9 @@ async function start() {
     status.textContent = t("hostWaitHint");
     // If the Wi-Fi reply doesn't arrive, the guest shows it as a code; this button scans it.
     const offered = pc;
-    $("#link-scan").classList.remove("hidden");
-    $("#link-scan").onclick = async () => {
-      if (pc !== offered || pc.remoteDescription || camera) return;
-      try {
-        camera = await openCamera($("#link-cam"));
-      } catch {
-        return (status.textContent = t("hostNoCamera"));
-      }
-      if (pc !== offered || panel.classList.contains("hidden")) return closePanel();
+    $("#link-scan").classList.toggle("hidden", !camera);
+    $("#link-scan").onclick = () => {
+      if (pc !== offered || pc.remoteDescription || !camera || stopScan) return;
       $("#link-scan").classList.add("hidden");
       $("#link-cam").classList.remove("hidden");
       status.textContent = t("hostScanHint");
