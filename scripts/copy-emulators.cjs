@@ -57,6 +57,16 @@ for (const [from, to] of Object.entries(coreMap)) {
   if (!bundle.includes(from)) throw new Error(`EmulatorJS core table changed, cannot find ${from}`);
   bundle = bundle.replace(from, to);
 }
+// The bottom menu bar opens only from its top-right button: not when the game starts, and not from
+// mouse moves or clicks (iOS turns taps near the bottom edge into mouse moves that open it).
+const menuPatches = {
+  "            this.menu.open();\n            if (this.isSafari && this.isMobile) {": "            if (this.isSafari && this.isMobile) {",
+  "        this.createBottomMenuBarListeners = () => {": "        this.createBottomMenuBarListeners = () => {};\n        const unusedMenuBarListeners = () => {",
+};
+for (const [from, to] of Object.entries(menuPatches)) {
+  if (bundle.split(from).length !== 2) throw new Error(`EmulatorJS menu bar code changed, cannot find ${from}`);
+  bundle = bundle.replace(from, to);
+}
 fs.writeFileSync(path.join(out, "emulator.min.js"), bundle);
 fs.copyFileSync(path.join(out, "emulator.css"), path.join(out, "emulator.min.css"));
 console.log(`copied EmulatorJS + ${cores.length} cores to public/ejs`);

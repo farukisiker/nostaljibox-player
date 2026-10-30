@@ -11,29 +11,67 @@ translatePage();
 const params = new URLSearchParams(location.search);
 const id = params.get("id");
 const BROKEN_SHADERS = ["2xScaleHQ.glslp", "4xScaleHQ.glslp"];
-// Two-button consoles get a sliding stick instead of the cross pad, plus a button that presses
-// both. Input ids follow EmulatorJS: the two buttons are 0 and 8, directions 4-7.
-// `left`/`right` label the 0 and 8 buttons; `center` lists [text, input id, offset] pairs.
-function twoButtonPad(left, right, combo, center) {
+// Every console gets the same controller: a sliding stick on the left, four face buttons in a
+// diamond on the right, shoulder buttons where the console has them and a row of small buttons in
+// the middle. Input ids follow EmulatorJS (RetroPad): B 0, Y 1, Select 2, Start 3, directions
+// 4-7, A 8, X 9, L 10, R 11, L2 12, R2 13, right analog stick 20-23.
+// `face` is [top, left, right, bottom], each [text, input id] or null for an inert blank button.
+// COMBO presses the right and bottom buttons together (bindComboButton adds the bottom one, 0).
+const COMBO = "combo";
+const DIAMOND = [{ left: 40, top: 0 }, { left: 0, top: 40 }, { left: 81, top: 40 }, { left: 40, top: 80 }];
+function pad({ face, shoulders, center = [], analog = false }) {
+  const buttons = face.map((b, i) => {
+    const at = { type: "button", location: "right", bold: true, ...DIAMOND[i] };
+    if (!b) return { ...at, text: "", id: `blank${i}`, input_value: 15 };
+    if (b[0] === COMBO) return { ...at, text: b[1], id: "ab", fontSize: 18, input_value: face[2][1] };
+    return { ...at, text: b[0], id: `face${i}`, input_value: b[1], ...(b[2] && { joystickInput: true }) };
+  });
+  const n = center.length;
   return [
-    { type: "zone", id: "dpad", location: "left", left: "50%", top: "50%", joystickInput: false, inputValues: [4, 5, 6, 7], color: "#ffffff" },
-    { type: "button", text: left, id: "b", location: "right", right: 75, top: 70, bold: true, input_value: 0 },
-    { type: "button", text: right, id: "a", location: "right", right: 5, top: 70, bold: true, input_value: 8 },
-    // EmulatorJS presses button 8 for this one; bindComboButton adds button 0.
-    { type: "button", text: combo, id: "ab", location: "right", right: 40, top: 5, bold: true, fontSize: 18, input_value: 8 },
-    ...center.map(([text, value, offset]) => ({ type: "button", text, id: text.toLowerCase().replace(/\W+/g, "_"), location: "center", left: offset, fontSize: 15, block: true, input_value: value })),
+    analog
+      ? { type: "zone", id: "stick", location: "left", left: "50%", top: "50%", joystickInput: true, inputValues: [16, 17, 18, 19], color: "#ffffff" }
+      : { type: "zone", id: "dpad", location: "left", left: "50%", top: "50%", joystickInput: false, inputValues: [4, 5, 6, 7], color: "#ffffff" },
+    ...buttons,
+    ...(shoulders
+      ? [
+          { type: "button", text: shoulders[0][0], id: "l", location: "left", left: 3, top: -55, bold: true, block: true, input_value: shoulders[0][1] },
+          { type: "button", text: shoulders[1][0], id: "r", location: "right", right: 3, top: -45, bold: true, block: true, input_value: shoulders[1][1] },
+        ]
+      : []),
+    // Centred under the picture, 65px apart.
+    ...center.map(([text, value, analogInput], i) => ({
+      type: "button", text, id: `center${i}`, location: "center", left: 30 + 65 * (i - (n - 1) / 2), fontSize: 15, block: true, input_value: value,
+      ...(analogInput && { joystickInput: true }),
+    })),
   ];
 }
-const START_SELECT = [["Start", 3, 60], ["Select", 2, -5]];
+const START_SELECT = [["Select", 2], ["Start", 3]];
+const twoButtons = (b, a, combo, center) => pad({ face: [[COMBO, combo], null, [a, 8], [b, 0]], center });
 const PADS = {
-  nes: twoButtonPad("B", "A", "A+B", START_SELECT),
-  gb: twoButtonPad("B", "A", "A+B", START_SELECT),
-  segaMS: twoButtonPad("1", "2", "1+2", []),
-  segaGG: twoButtonPad("1", "2", "1+2", [["Start", 3, 30]]),
-  pce: twoButtonPad("II", "I", "I+II", [["Run", 3, 60], ["Select", 2, -5]]),
-  atari7800: twoButtonPad("1", "2", "1+2", [["Reset", 9, -35], ["Select", 2, 30], ["Pause", 3, 95]]),
-  lynx: twoButtonPad("B", "A", "A+B", [["Opt 1", 10, -35], ["Start", 3, 30], ["Opt 2", 11, 95]]),
-  ngp: twoButtonPad("A", "B", "A+B", [["Option", 3, 30]]),
+  nes: twoButtons("B", "A", "A+B", START_SELECT),
+  gb: twoButtons("B", "A", "A+B", START_SELECT),
+  gba: pad({ face: [[COMBO, "A+B"], null, ["A", 8], ["B", 0]], shoulders: [["L", 10], ["R", 11]], center: START_SELECT }),
+  snes: pad({ face: [["X", 9], ["Y", 1], ["A", 8], ["B", 0]], shoulders: [["L", 10], ["R", 11]], center: START_SELECT }),
+  nds: pad({ face: [["X", 9], ["Y", 1], ["A", 8], ["B", 0]], shoulders: [["L", 10], ["R", 11]], center: START_SELECT }),
+  n64: pad({
+    analog: true,
+    face: [["C↑", 23, true], ["B", 1], ["C→", 20, true], ["A", 0]],
+    shoulders: [["Z", 12], ["R", 11]],
+    center: [["L", 10], ["C←", 21, true], ["Start", 3], ["C↓", 22, true]],
+  }),
+  psx: pad({ face: [["△", 9], ["□", 1], ["○", 8], ["✕", 0]], shoulders: [["L1", 10], ["R1", 11]], center: [["L2", 12], ["Select", 2], ["Start", 3], ["R2", 13]] }),
+  segaMD: pad({ face: [["Y", 9], ["A", 1], ["C", 8], ["B", 0]], shoulders: [["X", 10], ["Z", 11]], center: [["Mode", 2], ["Start", 3]] }),
+  segaMS: twoButtons("1", "2", "1+2", []),
+  segaGG: twoButtons("1", "2", "1+2", [["Start", 3]]),
+  pce: twoButtons("II", "I", "I+II", [["Select", 2], ["Run", 3]]),
+  atari2600: pad({ face: [null, null, null, ["●", 0]], center: [["Select", 2], ["Reset", 3]] }),
+  atari7800: twoButtons("1", "2", "1+2", [["Reset", 9], ["Select", 2], ["Pause", 3]]),
+  lynx: twoButtons("B", "A", "A+B", [["Opt 1", 10], ["Start", 3], ["Opt 2", 11]]),
+  ngp: twoButtons("A", "B", "A+B", [["Option", 3]]),
+  // The WonderSwan's second cross pad (Y1-Y4) sits in the middle row.
+  ws: twoButtons("B", "A", "A+B", [["Y↑", 13], ["Y↓", 12], ["Y←", 10], ["Y→", 11], ["Start", 3]]),
+  // The Virtual Boy's right cross pad sits in the middle row.
+  vb: pad({ face: [[COMBO, "A+B"], null, ["A", 8], ["B", 0]], shoulders: [["L", 10], ["R", 11]], center: [["R↑", 19], ["R↓", 18], ["Select", 2], ["Start", 3], ["R←", 17], ["R→", 16]] }),
 };
 
 function bindComboButton(emu) {
