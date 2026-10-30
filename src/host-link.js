@@ -3,7 +3,7 @@
 // the game in lockstep with the guest as player 2.
 import {
   createPeer, gatheringDone, encodeDescription, decodeDescription, drawQR, openCamera, stopCamera, scanQR,
-  shareInvite, pasteCode, findCode, onInviteLink,
+  shareInvite, pasteCode, findCode, onInviteLink, listenForAnswer, iceUfrag,
 } from "../shared/link.js";
 import { channelIO, Lockstep } from "./lockstep.js";
 import { t } from "../shared/i18n.js";
@@ -15,6 +15,7 @@ const status = $("#link-status");
 let pc = null;
 let camera = null;
 let stopScan = null;
+let inbox = null;
 let sync = null;
 let currentGame = () => null;
 
@@ -65,7 +66,13 @@ function closePanel() {
   camera = stopScan = null;
 }
 
+function stopInbox() {
+  if (inbox) inbox.stop();
+  inbox = null;
+}
+
 function hangUp() {
+  stopInbox();
   if (sync) sync.detach();
   sync = null;
   if (pc) pc.close();
@@ -90,18 +97,29 @@ async function start() {
   if (sync) return toast(t("p2AlreadyConnected"));
   hangUp();
   panel.classList.remove("hidden");
-  status.textContent = t("cameraOpening");
+  status.textContent = t("preparing");
 
-  // Camera first: its permission is what exposes LAN addresses to WebRTC.
-  try {
-    camera = await openCamera($("#link-cam"));
-  } catch {
-    status.textContent = t("hostNoCamera");
+  // The guest replies over the Wi-Fi, so only the guest scans a code. Without that inbox (web, or
+  // listening failed) the host scans the guest's reply instead.
+  inbox = await listenForAnswer((ufrag, code) => {
+    if (pc && pc.localDescription && ufrag === iceUfrag(pc.localDescription.sdp)) accept(code);
+  });
+  if (!inbox.info) {
+    status.textContent = t("cameraOpening");
+    // Camera first: its permission is what exposes LAN addresses to WebRTC.
+    try {
+      camera = await openCamera($("#link-cam"));
+    } catch {
+      status.textContent = t("hostNoCamera");
+    }
   }
+  $("#link-cam").classList.toggle("hidden", !camera);
+  $("#link-scan").classList.add("hidden");
 
   pc = createPeer();
   const channel = pc.createDataChannel("link", { ordered: true });
   channel.onopen = () => {
+    stopInbox();
     closePanel();
     document.body.classList.add("linked");
     toast(t("p2Connected"));
@@ -131,13 +149,31 @@ async function start() {
 
   await pc.setLocalDescription(await pc.createOffer());
   await gatheringDone(pc);
-  const code = await encodeDescription(pc.localDescription);
+  const code = await encodeDescription(pc.localDescription, inbox && inbox.info);
   await drawQR($("#link-qr"), code);
   $("#link-share").onclick = () =>
     shareInvite("join", code)
       .then((r) => r && r.copied && toast(t("inviteCopied")))
       .catch(() => {});
-  if (camera) {
+  if (inbox && inbox.info) {
+    status.textContent = t("hostWaitHint");
+    // If the Wi-Fi reply doesn't arrive, the guest shows it as a code; this button scans it.
+    const offered = pc;
+    $("#link-scan").classList.remove("hidden");
+    $("#link-scan").onclick = async () => {
+      if (pc !== offered || pc.remoteDescription || camera) return;
+      try {
+        camera = await openCamera($("#link-cam"));
+      } catch {
+        return (status.textContent = t("hostNoCamera"));
+      }
+      if (pc !== offered || panel.classList.contains("hidden")) return closePanel();
+      $("#link-scan").classList.add("hidden");
+      $("#link-cam").classList.remove("hidden");
+      status.textContent = t("hostScanHint");
+      stopScan = scanQR($("#link-cam"), accept);
+    };
+  } else if (camera) {
     status.textContent = t("hostScanHint");
     stopScan = scanQR($("#link-cam"), accept);
   }

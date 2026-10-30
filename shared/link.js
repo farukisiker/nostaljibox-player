@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT — part of nostaljibox-player/shared, usable outside the GPL player.
 // Two-phone play over the local network: both phones run the game and exchange button presses
 // (and, at the start, the ROM and a savestate) on a WebRTC data channel.
-// There is no server: the WebRTC offer/answer are exchanged as QR codes (or copied text).
+// There is no server: the guest scans the host's offer from a QR code (or gets it as copied text)
+// and hands its answer straight to the host over the Wi-Fi (PairInbox), or as a QR/text if that fails.
 import QRCode from "qrcode";
 import jsQR from "jsqr";
 import { Share } from "@capacitor/share";
 import { Clipboard } from "@capacitor/clipboard";
 import { App } from "@capacitor/app";
+import { registerPlugin } from "@capacitor/core";
 import { t } from "./i18n.js";
 
 const PREFIX = "NB1:";
@@ -65,6 +67,8 @@ export function minimizeSdp(sdp) {
 // SDP shape (one data channel), so only the per-session fields travel: ICE ufrag/password, the
 // DTLS fingerprint, the DTLS role and the host candidates (IPv4 or mDNS name). About 90 bytes,
 // in base32 so the QR uses alphanumeric mode. NB2 was the same for the old video-streaming SDP.
+// An offer may end with the host's inbox (its LAN addresses and a TCP port); older versions
+// ignore those trailing bytes.
 const PREFIX3 = "NB3:";
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const SETUPS = ["actpass", "active", "passive"];
@@ -122,6 +126,10 @@ function packFields(type, f) {
     else bytes.push(0, ...host.split(".").map(Number));
     bytes.push(port >> 8, port & 255);
   }
+  if (f.inbox) {
+    const ips = f.inbox.ips.slice(0, 3);
+    bytes.push(ips.length, ...ips.flatMap((ip) => ip.split(".").map(Number)), f.inbox.port >> 8, f.inbox.port & 255);
+  }
   return new Uint8Array(bytes);
 }
 
@@ -147,8 +155,15 @@ function unpackFields(bytes) {
     cands.push([host, (bytes[i] << 8) | bytes[i + 1]]);
     i += 2;
   }
+  let inbox = null;
+  if (i < bytes.length) {
+    const ips = [];
+    for (let n = bytes[i++]; n > 0; n--, i += 4) ips.push([...bytes.subarray(i, i + 4)].join("."));
+    inbox = { ips, port: (bytes[i] << 8) | bytes[i + 1] };
+    i += 2;
+  }
   if (!setup || !cands.length || i > bytes.length) throw new Error("bad code");
-  return { type, setup, ufrag, pwd, fp, cands };
+  return { type, setup, ufrag, pwd, fp, cands, inbox };
 }
 
 // Rebuilds the SDP the other phone produced.
@@ -164,9 +179,21 @@ function buildSdp(f) {
   ].join("\r\n") + "\r\n";
 }
 
-export async function encodeDescription(desc) {
+const isIPv4 = (ip) => /^\d+\.\d+\.\d+\.\d+$/.test(ip);
+
+// inbox ({ ips, port } from listenForAnswer) is added to an offer so the guest can reply over the Wi-Fi.
+export async function encodeDescription(desc, inbox = null) {
   const fields = sessionFields(desc.sdp);
-  if (fields) return PREFIX3 + toBase32(packFields(desc.type, fields));
+  if (fields) {
+    const ips = (inbox?.ips || []).filter(isIPv4);
+    if (ips.length) {
+      fields.inbox = { ips, port: inbox.port };
+      // Without camera permission the host's candidates are mDNS names, which phones often fail
+      // to resolve. The name only hides the address of the same socket, so put the real one in.
+      fields.cands = fields.cands.map(([h, p]) => [h.endsWith(".local") ? ips[0] : h, p]);
+    }
+    return PREFIX3 + toBase32(packFields(desc.type, fields));
+  }
   // Unusual SDP (e.g. mDNS candidates): fall back to the full compressed form.
   return PREFIX + (await deflate(JSON.stringify({ t: desc.type, s: minimizeSdp(desc.sdp) })));
 }
@@ -176,7 +203,7 @@ export async function decodeDescription(code) {
   if (/^NB2:/i.test(code)) throw new Error(t("oldVersion"));
   if (code.toUpperCase().startsWith(PREFIX3)) {
     const f = unpackFields(fromBase32(code.slice(PREFIX3.length).toUpperCase()));
-    return { type: f.type, sdp: buildSdp(f) };
+    return { type: f.type, sdp: buildSdp(f), inbox: f.inbox, ufrag: f.ufrag };
   }
   if (!code.startsWith(PREFIX)) throw new Error(t("notACode"));
   const { t, s } = JSON.parse(await inflate(code.slice(PREFIX.length)));
@@ -184,6 +211,48 @@ export async function decodeDescription(code) {
 }
 
 const isCode = (text) => text.startsWith(PREFIX) || /^NB[23]:/i.test(text);
+
+// ---------- answer over the Wi-Fi ----------
+// The host listens on a TCP port (native PairInbox plugin) and puts it in its QR code; the guest
+// connects and writes "<host ICE ufrag> <answer code>". The ufrag keeps stray connections out.
+const PairInbox = registerPlugin("PairInbox");
+
+// Calls onAnswer(ufrag, code) for each answer that arrives. Resolves to { info, stop }, where info
+// is { ips, port } for the offer, or null without the plugin (web) or when it could not listen.
+export async function listenForAnswer(onAnswer) {
+  if (!native()) return { info: null, stop() {} };
+  const sub = await PairInbox.addListener("message", ({ text }) => {
+    const [ufrag, code] = String(text).split(" ");
+    if (code && isCode(code)) onAnswer(ufrag, code);
+  });
+  const stop = () => {
+    sub.remove();
+    PairInbox.close().catch(() => {});
+  };
+  try {
+    return { info: await PairInbox.listen(), stop };
+  } catch {
+    stop();
+    return { info: null, stop() {} };
+  }
+}
+
+// Sends the answer to the host's inbox; resolves true once the host has it.
+export async function sendAnswer(inbox, ufrag, code) {
+  if (!native() || !inbox) return false;
+  for (const host of inbox.ips) {
+    try {
+      await PairInbox.send({ host, port: inbox.port, text: `${ufrag} ${code}` });
+      return true;
+    } catch {
+      // try the next address
+    }
+  }
+  return false;
+}
+
+// The ICE ufrag of an SDP: what the guest echoes back so the host knows the answer is for it.
+export const iceUfrag = (sdp) => (/^a=ice-ufrag:(\S+)/m.exec(sdp) || [])[1] || "";
 
 // Same-network play needs no STUN/TURN; host candidates are enough.
 export function createPeer() {

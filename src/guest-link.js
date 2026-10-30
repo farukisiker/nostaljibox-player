@@ -3,7 +3,7 @@
 // (kept in memory only, never added to the library) and runs it in lockstep as player 2.
 import {
   createPeer, gatheringDone, encodeDescription, decodeDescription, drawQR, openCamera, stopCamera, scanQR,
-  shareInvite, pasteCode, findCode, onInviteLink,
+  shareInvite, pasteCode, findCode, onInviteLink, sendAnswer,
 } from "../shared/link.js";
 import { channelIO, Lockstep } from "./lockstep.js";
 import { toast } from "./host-link.js";
@@ -66,13 +66,27 @@ export function setupGuestLink(boot) {
       const answer = await encodeDescription(pc.localDescription);
       stopCamera(camera);
       $("#join-scan").classList.add("hidden");
-      $("#join-answer").classList.remove("hidden");
-      await drawQR($("#join-qr"), answer);
-      $("#join-share").onclick = () =>
-        shareInvite("answer", answer)
-          .then((r) => r && r.copied && toast(t("replyCopied")))
-          .catch(() => {});
-      status.textContent = t("showReplyHint");
+      // Hand the answer to the host over the Wi-Fi; show it as a code only if that fails, or if
+      // the phones still have not connected a while later.
+      const showAnswer = async () => {
+        $("#join-answer").classList.remove("hidden");
+        await drawQR($("#join-qr"), answer);
+        $("#join-share").onclick = () =>
+          shareInvite("answer", answer)
+            .then((r) => r && r.copied && toast(t("replyCopied")))
+            .catch(() => {});
+        status.textContent = t("showReplyHint");
+      };
+      status.textContent = t("sendingReply");
+      if (await sendAnswer(offer.inbox, offer.ufrag, answer)) {
+        status.textContent = t("connecting");
+        const sent = pc;
+        setTimeout(() => {
+          if (pc === sent && pc.connectionState !== "connected") showAnswer();
+        }, 12000);
+      } else {
+        await showAnswer();
+      }
     } catch (e) {
       status.textContent = e.message || String(e);
       pc = null;
