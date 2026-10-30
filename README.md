@@ -37,13 +37,13 @@ It provides the WebAssembly emulation viewport powered by [EmulatorJS](https://e
 This repository is used by the NostaljiBox app as a git submodule at `player/`.
 
 The script `scripts/copy-emulators.cjs` is executed from the app root (e.g., during `npm run dev` or `npm run build`). It expects `node_modules/@emulatorjs/*` packages and writes the bundled emulator runtime into `public/ejs/`, patching the core table:
-- `snes` → `bsnes`
+- `snes` → `mesen-s`
 - `segaMD` → `clownmdemu`
 - `segaMS` / `segaGG` → `gearsystem`
 
 ## Rebuilding Cores
 
-Three cores (`bsnes`, `gearsystem`, and `clownmdemu`) are prebuilt into `cores/dist/` because EmulatorJS does not publish them on npm.
+Three cores (`mesen-s`, `gearsystem`, and `clownmdemu`) are prebuilt into `cores/dist/` because EmulatorJS does not publish them on npm.
 
 - **GitHub Actions:** Run `.github/workflows/build-cores.yml` via `workflow_dispatch` or push changes affecting the workflow or `cores/extra-cores.json`.
 - **Locally:** Use emsdk `3.1.74` and clone the EmulatorJS build scripts pinned to commit `6c0dc2e` with RetroArch `next` pinned to commit `a61f8a8905` (4.2.x compatible). Merge `cores/extra-cores.json` and build `clownmdemu` with `PLATFORM_DEFINES=-DCLOWNCD_NO_CHD`.
@@ -62,7 +62,7 @@ All bundled cores permit commercial distribution:
 
 | Core | Console | License | Upstream Source |
 |---|---|---|---|
-| bsnes | Super Nintendo | GPLv3 | https://github.com/libretro/bsnes |
+| Mesen-S | Super Nintendo | GPLv3 | https://github.com/libretro/Mesen-S |
 | Gearsystem | Master System / Game Gear | GPLv3 | https://github.com/drhelius/Gearsystem |
 | clownmdemu | Sega Mega Drive / Genesis | AGPLv3 | https://github.com/Clownacy/clownmdemu-libretro |
 | nestopia | NES / Famicom | GPLv2 | `@emulatorjs/core-nestopia` |

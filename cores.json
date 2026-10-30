@@ -3,5 +3,5 @@
     "nestopia", "mupen64plus_next", "gambatte", "mgba", "melonds", "pcsx_rearmed", "stella2014",
     "prosystem", "mednafen_pce", "handy", "mednafen_ngp", "mednafen_wswan", "beetle_vb"
   ],
-  "built": ["bsnes", "gearsystem", "clownmdemu"]
+  "built": ["mesen-s", "gearsystem", "clownmdemu"]
 }

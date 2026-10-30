@@ -11,9 +11,6 @@ translatePage();
 const params = new URLSearchParams(location.search);
 const id = params.get("id");
 const BROKEN_SHADERS = ["2xScaleHQ.glslp", "4xScaleHQ.glslp"];
-// bsnes switches emscripten fibers while serializing, which crashes the core when a savestate is
-// taken from JavaScript. Without savestates there are no save/load buttons and no two-phone play.
-const NO_STATES = ["snes"];
 // Two-button consoles get a sliding stick instead of the cross pad, plus a button that presses
 // both. Input ids follow EmulatorJS: the two buttons are 0 and 8, directions 4-7.
 // `left`/`right` label the 0 and 8 buttons; `center` lists [text, input id, offset] pairs.
@@ -78,8 +75,6 @@ function boot(game, rom, onStart, gameId = id) {
   const sys = byCore[game.core];
   document.title = `${game.name} · NostaljiBox`;
   lockOrientation(game.core);
-  const noStates = NO_STATES.includes(game.core);
-  document.body.classList.toggle("no-link", noStates);
 
   // Stretch the picture over the whole screen: read the device's screen size and give RetroArch
   // that exact aspect ratio (aspect_ratio_index 20 = "Config", i.e. use video_aspect_ratio).
@@ -108,7 +103,6 @@ function boot(game, rom, onStart, gameId = id) {
     // SABR is an xBR-family edge-directed upscaler: smooths the pixel staircase while keeping
     // edges sharp. Players can switch it in the menu (Ayarlar > Tonlayıcılar).
     EJS_defaultOptions: { shader: "sabr" },
-    ...(noStates && { EJS_Buttons: { saveState: false, loadState: false } }),
     ...(PADS[game.core] && { EJS_VirtualGamepadSettings: PADS[game.core] }),
     // "ready" fires before the core is downloaded, i.e. before RetroArch reads its config.
     EJS_ready: () => {

@@ -1,7 +1,7 @@
 name: Build GPL cores
 
 # Builds libretro cores whose licenses allow commercial (ad-supported) distribution and that the
-# EmulatorJS npm packages do not ship: bsnes and Mesen-S (SNES, GPLv3), Gearsystem (SMS/Game Gear, GPLv3),
+# EmulatorJS npm packages do not ship: Mesen-S (SNES, GPLv3), Gearsystem (SMS/Game Gear, GPLv3),
 # clownmdemu (Mega Drive, AGPLv3). Uses the official EmulatorJS build scripts and commits the
 # resulting .data files to cores/dist on the default branch.
 
@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core: ${{ fromJSON(inputs.cores || '["bsnes", "gearsystem", "clownmdemu", "mesen-s"]') }}
+        core: ${{ fromJSON(inputs.cores || '["mesen-s", "gearsystem", "clownmdemu"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Install build tools
