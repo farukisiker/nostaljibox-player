@@ -141,10 +141,11 @@ body.play {
   position: fixed;
   z-index: 50;
   top: calc(var(--sat) + 8px);
-  right: calc(var(--sar) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
 }
 #tools-toggle {

@@ -92,7 +92,7 @@ function fail(msg) {
   errorEl.classList.remove("hidden");
 }
 
-// One button in the top corner opens a panel with the toolbar's actions, so a stray tap during
+// One button at the top centre opens a panel with the toolbar's actions, so a stray tap during
 // play can't leave the game or end two-phone play.
 const toolsPanel = document.getElementById("tools-panel");
 const closeTools = () => toolsPanel.classList.add("hidden");
