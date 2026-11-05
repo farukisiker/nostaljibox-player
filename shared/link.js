@@ -308,12 +308,13 @@ export function scanQR(video, onCode) {
   const tick = () => {
     if (stopped) return;
     if (video.videoWidth) {
-      // Small frames turn each QR module into 2–3 pixels; 1280 keeps them readable.
-      const scale = Math.min(1, 1280 / video.videoWidth);
-      canvas.width = Math.round(video.videoWidth * scale);
-      canvas.height = Math.round(video.videoHeight * scale);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      // Only the middle square of the frame, at full resolution: small frames turn each QR module
+      // into 2–3 pixels. Every pass allocates a frame-sized buffer (and jsQR a few more), and
+      // iOS counts that garbage against the page's 1.5 GB limit long after it is freed.
+      const side = Math.min(video.videoWidth, video.videoHeight, 720);
+      if (canvas.width !== side) canvas.width = canvas.height = side;
+      ctx.drawImage(video, (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side, 0, 0, side, side);
+      const img = ctx.getImageData(0, 0, side, side);
       const hit = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
       if (hit && isCode(hit.data)) {
         stopped = true;
@@ -321,7 +322,7 @@ export function scanQR(video, onCode) {
         return;
       }
     }
-    setTimeout(tick, 120);
+    setTimeout(tick, 200);
   };
   tick();
   return () => (stopped = true);
