@@ -84,6 +84,30 @@ function bindComboButton(emu) {
   el.addEventListener("touchend", release);
   el.addEventListener("touchcancel", release);
 }
+// WebKit on iOS 18 copies each frame RetroArch uploads (a view into the core's 128 MB memory) and
+// gives the copies back only under memory pressure: about 10 MB a second, until iOS killed the
+// page at its 1.5 GB limit a few minutes into a game. Uploading from one small reused buffer
+// instead keeps that memory flat.
+function uploadFramesFromCopies() {
+  let scratch = null;
+  for (const Ctx of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
+    if (!Ctx) continue;
+    const texSubImage2D = Ctx.prototype.texSubImage2D;
+    Ctx.prototype.texSubImage2D = function (...args) {
+      const pixels = args[args.length - 1];
+      if (ArrayBuffer.isView(pixels) && pixels.byteLength < pixels.buffer.byteLength) {
+        if (!scratch || scratch.constructor !== pixels.constructor || scratch.length !== pixels.length) {
+          scratch = new pixels.constructor(pixels.length);
+        }
+        scratch.set(pixels);
+        args[args.length - 1] = scratch;
+      }
+      return texSubImage2D.apply(this, args);
+    };
+  }
+}
+uploadFramesFromCopies();
+
 const errorEl = document.getElementById("error");
 let current = null;
 
@@ -139,7 +163,7 @@ function boot(game, rom, onStart, gameId = id) {
   const long = Math.max(w, h);
   const short = Math.min(w, h);
   const aspect = portrait ? short / long : long / short;
-  const fullScreenCfg = `video_aspect_ratio_auto = "false"\naspect_ratio_index = "20"\nvideo_aspect_ratio = "${aspect.toFixed(4)}"\nvideo_scale_integer = "false"\n`;
+  const fullScreenCfg = `video_aspect_ratio_auto = "false"\naspect_ratio_index = "20"\nvideo_aspect_ratio = "${aspect.toFixed(4)}"\nvideo_scale_integer = "false"\naudio_resampler = "nearest"\naudio_resampler_quality = "1"\n`;
 
   // EmulatorJS reads its configuration from globals, then loader.js boots it.
   Object.assign(window, {
@@ -161,11 +185,6 @@ function boot(game, rom, onStart, gameId = id) {
     ...(PADS[game.core] && { EJS_VirtualGamepadSettings: PADS[game.core] }),
     // "ready" fires before the core is downloaded, i.e. before RetroArch reads its config.
     EJS_ready: () => {
-      const proto = window.EJS_GameManager.prototype;
-      const base = proto.getRetroArchCfg;
-      proto.getRetroArchCfg = function () {
-        return base.call(this) + fullScreenCfg;
-      };
       // ScaleHQ shifts the picture right on some phones (an 8-pixel strip of the backdrop shows
       // on the left), so keep it out of the shader menu. The menu is built after this event.
       const shaders = window.EJS_emulator.config.shaders || {};
@@ -177,6 +196,21 @@ function boot(game, rom, onStart, gameId = id) {
       if (BROKEN_SHADERS.includes(emu.getSettingValue("shader"))) emu.changeSettingOption("shader", "sabr");
       bindComboButton(emu);
       if (onStart) onStart(emu);
+    },
+  });
+  // Add our RetroArch settings the moment EmulatorJS defines its game manager. Patching it on the
+  // "ready" event came too late when the core loaded quickly (after iOS reloaded the page), and
+  // the game came back in 4:3 instead of filling the screen.
+  let gameManager;
+  Object.defineProperty(window, "EJS_GameManager", {
+    configurable: true,
+    get: () => gameManager,
+    set(cls) {
+      const base = cls.prototype.getRetroArchCfg;
+      cls.prototype.getRetroArchCfg = function () {
+        return base.call(this) + fullScreenCfg;
+      };
+      gameManager = cls;
     },
   });
   const script = document.createElement("script");
