@@ -108,6 +108,12 @@ function uploadFramesFromCopies() {
 }
 uploadFramesFromCopies();
 
+// RetroArch sizes its canvas to CSS size × devicePixelRatio: 1624×750 on an iPhone XR, about 5 MB
+// for every frame buffer. iOS 18 still piled those up faster than it freed them (up to 75 MB a
+// second on the XR) and killed the page within a minute. A retro picture gains nothing from
+// retina pixels, so render at CSS size: a quarter of the memory and of the GPU work per frame.
+Object.defineProperty(window, "devicePixelRatio", { configurable: true, get: () => 1 });
+
 const errorEl = document.getElementById("error");
 let current = null;
 
