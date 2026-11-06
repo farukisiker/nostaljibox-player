@@ -47,8 +47,9 @@ let bundle = order.map((f) => fs.readFileSync(path.join(out, "src", f), "utf8"))
 const coreMap = {
   // fceumm makes iOS reload the game page mid-play (seen on an iPhone XR); nestopia runs fine.
   '"nes": ["fceumm", "nestopia"]': '"nes": ["nestopia"]',
-  // bsnes makes iOS reload the game page a few seconds into play (seen on an iPhone XR).
-  '"snes": ["snes9x"]': '"snes": ["mesen-s"]',
+  // bsnes made iOS reload the game page and Mesen-S ran at 9 fps on a low-end Android tablet;
+  // Supafaust (Mednafen's snes_faust) is built for weak ARM devices.
+  '"snes": ["snes9x"]': '"snes": ["supafaust"]',
   '"segaMS": ["smsplus", "genesis_plus_gx", "picodrive"]': '"segaMS": ["gearsystem"]',
   '"segaMD": ["genesis_plus_gx", "picodrive"]': '"segaMD": ["clownmdemu"]',
   '"segaGG": ["genesis_plus_gx"]': '"segaGG": ["gearsystem"]',

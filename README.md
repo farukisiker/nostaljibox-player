@@ -62,7 +62,7 @@ All bundled cores permit commercial distribution:
 
 | Core | Console | License | Upstream Source |
 |---|---|---|---|
-| Mesen-S | Super Nintendo | GPLv3 | https://github.com/libretro/Mesen-S |
+| Beetle Supafaust | Super Nintendo | GPLv2 | https://github.com/libretro/supafaust |
 | Gearsystem | Master System / Game Gear | GPLv3 | https://github.com/drhelius/Gearsystem |
 | clownmdemu | Sega Mega Drive / Genesis | AGPLv3 | https://github.com/Clownacy/clownmdemu-libretro |
 | nestopia | NES / Famicom | GPLv2 | `@emulatorjs/core-nestopia` |

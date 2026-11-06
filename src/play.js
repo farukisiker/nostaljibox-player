@@ -214,7 +214,10 @@ function boot(game, rom, onStart, gameId = id) {
     set(cls) {
       const base = cls.prototype.getRetroArchCfg;
       cls.prototype.getRetroArchCfg = function () {
-        return base.call(this) + fullScreenCfg;
+        // Extra RetroArch lines from localStorage, for tuning on a device over the debugger.
+        let extra = "";
+        try { extra = localStorage.getItem("nb_extra_cfg") || ""; } catch {}
+        return base.call(this) + fullScreenCfg + extra;
       };
       gameManager = cls;
     },
