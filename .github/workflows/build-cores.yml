@@ -75,6 +75,9 @@ jobs:
           cd supafaust
           sed -i 's/"PPU renderer; mt|st"/"PPU renderer; st|mt"/; s/affinity mask; 0x2|0x0|/affinity mask; 0x0|0x2|/; s/affinity mask; 0x1|0x0|/affinity mask; 0x0|0x1|/' libretro.cpp
           grep -c '"PPU renderer; st|mt"\|mask; 0x0|0x2|\|mask; 0x0|0x1|' libretro.cpp | grep -qx 3
+          # The EmulatorJS threaded variant passes EMULATORJS_THREADS=1; compile with -pthread then.
+          sed -i 's|^   TARGET := $(TARGET_NAME)_libretro_$(platform).bc$|&\n   ifeq ($(EMULATORJS_THREADS),1)\n      FLAGS += -pthread\n   endif|' Makefile
+          grep -q EMULATORJS_THREADS Makefile
       - name: Build ${{ matrix.core }}
         working-directory: ejs-build
         # build.sh exits 0 even when the core fails to compile, so check for its output.
