@@ -78,6 +78,9 @@ jobs:
           # The EmulatorJS threaded variant passes EMULATORJS_THREADS=1; compile with -pthread then.
           sed -i 's|^   TARGET := $(TARGET_NAME)_libretro_$(platform).bc$|&\n   ifeq ($(EMULATORJS_THREADS),1)\n      FLAGS += -pthread\n   endif|' Makefile
           grep -q EMULATORJS_THREADS Makefile
+          # build.sh packs <core name>-wasm.data, so the output must be named after the core.
+          sed -i 's/^TARGET_NAME := mednafen_supafaust$/TARGET_NAME := supafaust/' Makefile
+          grep -qx 'TARGET_NAME := supafaust' Makefile
       - name: Build ${{ matrix.core }}
         working-directory: ejs-build
         # build.sh exits 0 even when the core fails to compile, so check for its output.
