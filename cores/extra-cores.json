@@ -1,8 +1,17 @@
 [
   {
     "name": "gearsystem",
-    "extensions": ["sms", "gg", "sg", "bin"],
-    "makeoptions": { "buildpath": "./platforms/libretro/", "makescript": "Makefile", "arguments": [] },
+    "extensions": [
+      "sms",
+      "gg",
+      "sg",
+      "bin"
+    ],
+    "makeoptions": {
+      "buildpath": "./platforms/libretro/",
+      "makescript": "Makefile",
+      "arguments": []
+    },
     "options": {},
     "save": "srm",
     "license": "LICENSE",
@@ -10,8 +19,21 @@
   },
   {
     "name": "clownmdemu",
-    "extensions": ["md", "gen", "smd", "bin", "68k", "sgd"],
-    "makeoptions": { "buildpath": "./", "makescript": "Makefile", "arguments": ["PLATFORM_DEFINES=-DCLOWNCD_NO_CHD"] },
+    "extensions": [
+      "md",
+      "gen",
+      "smd",
+      "bin",
+      "68k",
+      "sgd"
+    ],
+    "makeoptions": {
+      "buildpath": "./",
+      "makescript": "Makefile",
+      "arguments": [
+        "PLATFORM_DEFINES=-DCLOWNCD_NO_CHD"
+      ]
+    },
     "options": {},
     "save": "srm",
     "license": "LICENCE.txt",
@@ -19,11 +41,44 @@
   },
   {
     "name": "mesen-s",
-    "extensions": ["smc", "sfc", "swc", "fig", "bs"],
-    "makeoptions": { "buildpath": "./Libretro", "makescript": "Makefile", "arguments": ["SHARED=-r"] },
+    "extensions": [
+      "smc",
+      "sfc",
+      "swc",
+      "fig",
+      "bs"
+    ],
+    "makeoptions": {
+      "buildpath": "./Libretro",
+      "makescript": "Makefile",
+      "arguments": [
+        "SHARED=-r"
+      ]
+    },
     "options": {},
     "save": "srm",
     "license": "LICENSE",
     "repo": "https://github.com/libretro/Mesen-S"
+  },
+  {
+    "name": "supafaust",
+    "extensions": [
+      "smc",
+      "sfc",
+      "swc",
+      "fig",
+      "bs"
+    ],
+    "makeoptions": {
+      "buildpath": "./",
+      "makescript": "Makefile",
+      "arguments": [
+        "NO_GCC=1"
+      ]
+    },
+    "options": {},
+    "save": "srm",
+    "license": "COPYING",
+    "repo": "https://github.com/libretro/supafaust"
   }
 ]
