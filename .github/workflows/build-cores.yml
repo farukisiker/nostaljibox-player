@@ -17,6 +17,9 @@ on:
       retroarch:
         description: EmulatorJS RetroArch commit (default a61f8a8905)
         required: false
+      buildref:
+        description: EmulatorJS build scripts commit (default 6c0dc2e)
+        required: false
       publish:
         description: Commit the built cores to cores/dist (set false for test builds)
         required: false
@@ -50,7 +53,7 @@ jobs:
       - name: Get EmulatorJS build scripts
         run: |
           git clone https://github.com/EmulatorJS/build.git ejs-build
-          git -C ejs-build checkout 6c0dc2e
+          git -C ejs-build checkout ${{ inputs.buildref || '6c0dc2e' }}
           mkdir -p ejs-build/compile
           git clone -b next https://github.com/EmulatorJS/RetroArch.git ejs-build/compile/RetroArch
           git -C ejs-build/compile/RetroArch checkout ${{ inputs.retroarch || 'a61f8a8905' }}
@@ -105,7 +108,7 @@ jobs:
         run: tail -n 200 ejs-build/output/logs/* 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
-          name: core-${{ matrix.core }}-${{ inputs.emsdk || '3.1.74' }}-${{ inputs.retroarch || 'a61f8a8905' }}
+          name: core-${{ matrix.core }}-${{ inputs.emsdk || '3.1.74' }}-${{ inputs.retroarch || 'a61f8a8905' }}-${{ inputs.buildref || '6c0dc2e' }}
           path: |
             ejs-build/output/*.data
             ejs-build/output/reports/*.json
