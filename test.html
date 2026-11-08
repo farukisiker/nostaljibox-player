@@ -16,7 +16,7 @@
 <div id="box">
   <b>1) Çekirdek seç, 2) ROM dosyasını seç</b>
   <label><input type="radio" name="core" value="cur" checked> A: Uygulamadaki Supafaust (şu an sıfırlanan)</label>
-  <label><input type="radio" name="core" value="ra06"> B: Supafaust, Haziran 2025 RetroArch (yeni)</label>
+  <label><input type="radio" name="core" value="s9ours"> B: snes9x, bizim derlememiz</label>
   <label><input type="radio" name="core" value="snes9x"> C: Resmi snes9x (karşılaştırma)</label>
   <input type="file" id="file">
   <div id="info" style="color:#aaa;font-size:14px"></div>
@@ -35,8 +35,13 @@
     window.EJS_gameUrl = file;
     window.EJS_startOnLoaded = true;
     window.EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
+    window.EJS_disableDatabases = true;
+    window.EJS_disableLocalStorage = true;
     if (choice === "snes9x") {
       window.EJS_core = "snes";
+    } else if (choice === "s9ours") {
+      window.EJS_core = "snes";
+      window.EJS_paths = { "snes9x-legacy-wasm.data": base + "snes9x-ours-legacy-wasm.data", "snes9x-wasm.data": base + "snes9x-ours-legacy-wasm.data" };
     } else {
       window.EJS_core = "supafaust";
       const url = base + "supafaust-" + choice + "-legacy-wasm.data";
