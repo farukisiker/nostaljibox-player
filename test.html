@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SNES core test</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #fff; font: 17px -apple-system, sans-serif; }
+  #box { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  #box label { padding: 16px; border: 1px solid #555; border-radius: 10px; }
+  #game { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<!-- Temporary test page: same EmulatorJS 4.2.3 as the app (from its CDN), three SNES cores to compare on iOS Safari. -->
+<div id="box">
+  <b>1) Çekirdek seç, 2) ROM dosyasını seç</b>
+  <label><input type="radio" name="core" value="cur" checked> A: Uygulamadaki Supafaust (şu an sıfırlanan)</label>
+  <label><input type="radio" name="core" value="ra06"> B: Supafaust, Haziran 2025 RetroArch (yeni)</label>
+  <label><input type="radio" name="core" value="snes9x"> C: Resmi snes9x (karşılaştırma)</label>
+  <input type="file" id="file">
+  <div id="info" style="color:#aaa;font-size:14px"></div>
+</div>
+<div id="game" hidden></div>
+<script>
+  const base = "https://raw.githubusercontent.com/farukisiker/nostaljibox-player/core-tests/";
+  document.getElementById("file").addEventListener("change", (ev) => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    const choice = document.querySelector("input[name=core]:checked").value;
+    document.getElementById("box").remove();
+    document.getElementById("game").hidden = false;
+    window.EJS_player = "#game";
+    window.EJS_gameName = file.name.split(".")[0];
+    window.EJS_gameUrl = file;
+    window.EJS_startOnLoaded = true;
+    window.EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
+    if (choice === "snes9x") {
+      window.EJS_core = "snes";
+    } else {
+      window.EJS_core = "supafaust";
+      const url = base + "supafaust-" + choice + "-legacy-wasm.data";
+      window.EJS_paths = { "supafaust-legacy-wasm.data": url, "supafaust-wasm.data": url };
+    }
+    document.title = "core " + choice;
+    const s = document.createElement("script");
+    s.src = window.EJS_pathtodata + "loader.js";
+    document.body.appendChild(s);
+  });
+</script>
+</body>
+</html>
