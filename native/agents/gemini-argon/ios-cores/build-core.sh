@@ -37,7 +37,10 @@ case "$SLICE" in
     ;;
 esac
 
-eval "$(python3 - "$LOCK_FILE" "$CORE" <<'PY'
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/ios-core-${CORE}-${SLICE}.XXXXXX")"
+trap 'rm -rf "$WORKDIR"' EXIT
+
+python3 - "$LOCK_FILE" "$CORE" > "$WORKDIR/meta.sh" <<'PY'
 import json, shlex, sys
 
 lock_path, core = sys.argv[1], sys.argv[2]
@@ -59,16 +62,15 @@ args = entry.get("args", [])
 quoted_args = " ".join(shlex.quote(a) for a in args)
 print(f"EXTRA_ARGS=({quoted_args})")
 PY
-)"
+
+# shellcheck disable=SC1091
+source "$WORKDIR/meta.sh"
 
 SDKPATH="$(xcrun --sdk "$SDK" --show-sdk-path)"
 echo "=== Building $CORE ($SLICE) ==="
 echo "  Repo:     $REPO @ $COMMIT"
 echo "  SDK:      $SDK ($SDKPATH)"
 echo "  Target:   $TARGET"
-
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/ios-core-${CORE}-${SLICE}.XXXXXX")"
-trap 'rm -rf "$WORKDIR"' EXIT
 
 mkdir -p "$WORKDIR/src"
 git -C "$WORKDIR/src" init -q
@@ -108,7 +110,7 @@ make -C "$BUILD_DIR" -f "$MAKEFILE" -j"$JOBS" \
   CXX="$CXX_CMD" \
   IPHONEMINVER="-target $TARGET $MINVER_FLAG" \
   MINVERSION="-target $TARGET $MINVER_FLAG" \
-  "${EXTRA_ARGS[@]}"
+  ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 
 BUILT_DYLIB="$BUILD_DIR/$OUTPUT_NAME"
 if [ ! -f "$BUILT_DYLIB" ]; then
