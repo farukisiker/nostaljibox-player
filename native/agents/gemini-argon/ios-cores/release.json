@@ -1,9 +1,21 @@
 {
-  "tag": "ios-cores-27fc7ce3d9df",
+  "tag": "ios-cores-d6ed1fa9ce8b",
   "cores": {
+    "clownmdemu": {
+      "url": "https://github.com/farukisiker/nostaljibox-player/releases/download/ios-cores-d6ed1fa9ce8b/clownmdemu.xcframework.zip",
+      "checksum": "0167d8459ed7f572e1b8a9c2c10a5722bd749bb2399c2c3713cf9a434724fc33"
+    },
+    "gearsystem": {
+      "url": "https://github.com/farukisiker/nostaljibox-player/releases/download/ios-cores-d6ed1fa9ce8b/gearsystem.xcframework.zip",
+      "checksum": "10e5b3636c3caf2ad0cfc76f1fc86e0acb7a728a266ff9220bbd884b4369d795"
+    },
+    "nestopia": {
+      "url": "https://github.com/farukisiker/nostaljibox-player/releases/download/ios-cores-d6ed1fa9ce8b/nestopia.xcframework.zip",
+      "checksum": "3810ec167b6a9c822ae27b9d0944ef0c7557b3dc19c5075ed71827537a10d71f"
+    },
     "supafaust": {
-      "url": "https://github.com/farukisiker/nostaljibox-player/releases/download/ios-cores-27fc7ce3d9df/supafaust.xcframework.zip",
-      "checksum": "f4d7692999333f6560bbfd8c515e38215c7e9283ee1498a39c371c5295ab2ecb"
+      "url": "https://github.com/farukisiker/nostaljibox-player/releases/download/ios-cores-d6ed1fa9ce8b/supafaust.xcframework.zip",
+      "checksum": "e029aefd237fe41c36bfbc6f558686fb07fb064fdb44fca2b750e51516ee5abb"
     }
   }
 }
