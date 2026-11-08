@@ -62,10 +62,10 @@ jobs:
           echo "scheme=$SCHEME udid=$UDID"
           # TEST_RUNNER_<NAME> environment variables reach the test process as <NAME>.
           export TEST_RUNNER_NB_CORES_DIR="$NB_CORES_DIR"
-          set -o pipefail
-          xcodebuild test -scheme "$SCHEME" -destination "platform=iOS Simulator,id=$UDID" \
-            -resultBundlePath "$RUNNER_TEMP/tests.xcresult" 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E "error:|warning: unhandled|Test Case|Executed|BUILD|\*\*" || true
-          test "${PIPESTATUS[0]}" = 0
+          rc=0
+          xcodebuild test -scheme "$SCHEME" -destination "platform=iOS Simulator,id=$UDID"             -resultBundlePath "$RUNNER_TEMP/tests.xcresult" > "$RUNNER_TEMP/xcodebuild.log" 2>&1 || rc=$?
+          grep -E "error:|warning: unhandled|Test Case|Executed|BUILD|\*\*" "$RUNNER_TEMP/xcodebuild.log" | tail -200 || true
+          exit $rc
       - name: Upload logs
         if: always() && steps.pkg.outputs.present == 'true'
         uses: actions/upload-artifact@v4
