@@ -1,0 +1,9 @@
+{
+  "tag": "ios-cores-27fc7ce3d9df",
+  "cores": {
+    "supafaust": {
+      "url": "https://github.com/farukisiker/nostaljibox-player/releases/download/ios-cores-27fc7ce3d9df/supafaust.xcframework.zip",
+      "checksum": "f588555c703dbe5f91efb4bd1d04acdfefa3aa5f04195f5290e80a6a6d51436a"
+    }
+  }
+}
