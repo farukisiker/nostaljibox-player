@@ -6,14 +6,6 @@ name: Build iOS Libretro Cores
 # Owner: gemini-argon (WP0).
 
 on:
-  push:
-    branches: [native-player, "np/**"]
-    paths:
-      - "native/agents/gemini-argon/ios-cores/cores.lock.json"
-      - "native/agents/gemini-argon/ios-cores/build-core.sh"
-      - "native/agents/gemini-argon/ios-cores/make-framework.sh"
-      - "native/agents/gemini-argon/ios-cores/patches/**"
-      - ".github/workflows/ios-cores.yml"
   workflow_dispatch:
     inputs:
       cores:
@@ -25,6 +17,11 @@ on:
         description: "Publish built XCFrameworks to GitHub Release ios-cores-<LOCKHASH>"
         required: false
         default: true
+        type: boolean
+      force_republish:
+        description: "Overwrite existing <core>.xcframework.zip assets in ios-cores-<LOCKHASH>"
+        required: false
+        default: false
         type: boolean
 
 permissions:
@@ -41,6 +38,7 @@ jobs:
       cores: ${{ steps.meta.outputs.cores }}
       lockhash: ${{ steps.meta.outputs.lockhash }}
       publish: ${{ steps.meta.outputs.publish }}
+      force_republish: ${{ steps.meta.outputs.force_republish }}
     steps:
       - uses: actions/checkout@v4
       - name: Compute lockhash and core matrix
@@ -48,6 +46,7 @@ jobs:
         env:
           INPUT_CORES: ${{ inputs.cores }}
           INPUT_PUBLISH: ${{ inputs.publish }}
+          INPUT_FORCE_REPUBLISH: ${{ inputs.force_republish }}
         run: |
           LOCK="native/agents/gemini-argon/ios-cores/cores.lock.json"
           LOCKHASH=$(shasum -a 256 "$LOCK" | cut -c1-12)
@@ -78,6 +77,12 @@ jobs:
             echo "publish=false" >> "$GITHUB_OUTPUT"
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$INPUT_FORCE_REPUBLISH" = "true" ]; then
+            echo "force_republish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "force_republish=false" >> "$GITHUB_OUTPUT"
           fi
 
   build:
@@ -129,33 +134,62 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           LOCKHASH: ${{ needs.prepare.outputs.lockhash }}
+          FORCE_REPUBLISH: ${{ needs.prepare.outputs.force_republish }}
         run: |
           mkdir -p "$RUNNER_TEMP/release"
           find "$RUNNER_TEMP/artifacts" -name '*.xcframework.zip' -exec cp {} "$RUNNER_TEMP/release/" \;
           find "$RUNNER_TEMP/artifacts" -name 'checksums.txt' -exec cat {} + | sort -u > "$RUNNER_TEMP/release/checksums.txt"
 
-          echo "=== Release tag: ios-cores-$LOCKHASH ==="
-          ls -la "$RUNNER_TEMP/release"
-          echo "=== checksums.txt ==="
+          TAG="ios-cores-$LOCKHASH"
+          echo "=== Release tag: $TAG (force_republish=$FORCE_REPUBLISH) ==="
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" "$RUNNER_TEMP/release"/*.xcframework.zip "$RUNNER_TEMP/release/checksums.txt" \
+              --target "${{ github.sha }}" \
+              --title "$TAG" \
+              --notes "Prebuilt iOS (arm64 device + simulator, minos 15.0) libretro core XCFrameworks for cores.lock.json ($LOCKHASH)."
+          else
+            EXISTING="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+            CHANGED=0
+            for z in "$RUNNER_TEMP/release"/*.xcframework.zip; do
+              NAME="$(basename "$z")"
+              if [ "$FORCE_REPUBLISH" = "true" ]; then
+                echo "Uploading $NAME (force_republish=true)..."
+                gh release upload "$TAG" "$z" --clobber
+                CHANGED=1
+              elif printf '%s\n' "$EXISTING" | grep -Fxq "$NAME"; then
+                echo "$NAME: already published, keeping"
+              else
+                echo "Uploading new core asset $NAME..."
+                gh release upload "$TAG" "$z"
+                CHANGED=1
+              fi
+            done
+
+            if [ "$CHANGED" -eq 1 ] || ! printf '%s\n' "$EXISTING" | grep -Fxq "checksums.txt"; then
+              mkdir -p "$RUNNER_TEMP/release-zips"
+              gh release download "$TAG" -p '*.xcframework.zip' -D "$RUNNER_TEMP/release-zips"
+              (
+                cd "$RUNNER_TEMP/release-zips"
+                shasum -a 256 *.xcframework.zip | sort -k2 > "$RUNNER_TEMP/release/checksums.txt"
+              )
+              gh release upload "$TAG" "$RUNNER_TEMP/release/checksums.txt" --clobber
+            else
+              echo "checksums.txt: already published, keeping"
+              gh release download "$TAG" -p 'checksums.txt' -D "$RUNNER_TEMP/release" --clobber
+            fi
+          fi
+
+          echo "=== checksums.txt in release $TAG ==="
           cat "$RUNNER_TEMP/release/checksums.txt"
 
           {
-            echo "### iOS Cores Release \`ios-cores-$LOCKHASH\`"
+            echo "### iOS Cores Release \`$TAG\`"
             echo ""
             echo "\`\`\`"
             cat "$RUNNER_TEMP/release/checksums.txt"
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
-
-          TAG="ios-cores-$LOCKHASH"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$RUNNER_TEMP/release"/*.xcframework.zip "$RUNNER_TEMP/release/checksums.txt" --clobber
-          else
-            gh release create "$TAG" "$RUNNER_TEMP/release"/*.xcframework.zip "$RUNNER_TEMP/release/checksums.txt" \
-              --target "${{ github.sha }}" \
-              --title "$TAG" \
-              --notes "Prebuilt iOS (arm64 device + simulator, minos 15.0) libretro core XCFrameworks for cores.lock.json ($LOCKHASH)."
-          fi
       - name: Upload combined release artifact
         uses: actions/upload-artifact@v4
         with:

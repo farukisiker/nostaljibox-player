@@ -3,7 +3,7 @@
   "cores": {
     "supafaust": {
       "url": "https://github.com/farukisiker/nostaljibox-player/releases/download/ios-cores-27fc7ce3d9df/supafaust.xcframework.zip",
-      "checksum": "7a7c91d531b29b30415456ca836a31ba980b1ce33f4ca54104a63d9170e7774d"
+      "checksum": "f4d7692999333f6560bbfd8c515e38215c7e9283ee1498a39c371c5295ab2ecb"
     }
   }
 }
