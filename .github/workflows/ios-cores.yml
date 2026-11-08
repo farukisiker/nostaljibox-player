@@ -9,7 +9,10 @@ on:
   push:
     branches: [native-player, "np/**"]
     paths:
-      - "native/agents/gemini-argon/ios-cores/**"
+      - "native/agents/gemini-argon/ios-cores/cores.lock.json"
+      - "native/agents/gemini-argon/ios-cores/build-core.sh"
+      - "native/agents/gemini-argon/ios-cores/make-framework.sh"
+      - "native/agents/gemini-argon/ios-cores/patches/**"
       - ".github/workflows/ios-cores.yml"
   workflow_dispatch:
     inputs:
