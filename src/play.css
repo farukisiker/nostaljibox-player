@@ -133,6 +133,15 @@ body.play {
   overflow: hidden;
   overscroll-behavior: none;
 }
+/* Native player (iOS): the WebView sits transparent over the native video view, so both the
+   page background and the gradient must go. #game holds EmulatorJS's canvas, which is not used. */
+html.native,
+html.native body {
+  background: transparent !important;
+}
+html.native #game {
+  display: none;
+}
 #game {
   position: fixed;
   inset: 0;

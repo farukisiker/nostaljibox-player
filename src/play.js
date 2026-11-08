@@ -4,6 +4,7 @@ import { get, put } from "../shared/storage.js";
 import { setupHostLink } from "./host-link.js";
 import { setupGuestLink } from "./guest-link.js";
 import { t, ejsLanguage, translatePage } from "../shared/i18n.js";
+import { useNative, bootNative, stopNative } from "./native-player.js";
 import "./play.css";
 
 translatePage();
@@ -116,6 +117,10 @@ Object.defineProperty(window, "devicePixelRatio", { configurable: true, get: () 
 
 const errorEl = document.getElementById("error");
 let current = null;
+// Set while the iOS native player owns the game (see native-player.js); EmulatorJS otherwise.
+let nativeMode = false;
+// `p2=1` (after switching away from the native player) opens the link panel once per page load.
+let p2AutoOpened = false;
 
 function fail(msg) {
   errorEl.textContent = msg;
@@ -134,13 +139,59 @@ toolsPanel.addEventListener("click", closeTools);
 document.addEventListener("pointerdown", (ev) => {
   if (!ev.target.closest("#play-tools")) closeTools();
 });
-document.getElementById("back").addEventListener("click", () => {
+document.getElementById("back").addEventListener("click", async () => {
+  // The native session has to end before the page goes away; the ad rule does not change.
+  if (nativeMode) await stopNative();
   location.href = "../index.html?from=game";
 });
-// EmulatorJS's own bottom menu bar; its corner button is hidden in play.css.
+// EmulatorJS's own bottom menu bar; its corner button is hidden in play.css. In native mode the
+// native menu (src/native-menu.js) listens for this event instead.
 document.getElementById("emu-menu").addEventListener("click", () => {
+  if (nativeMode) {
+    document.dispatchEvent(new CustomEvent("nb:native-menu"));
+    return;
+  }
   const emu = window.EJS_emulator;
   if (emu && emu.menu) emu.menu.toggle();
+});
+
+// Host netplay runs on EmulatorJS (PLAN §2.3). Registered before setupHostLink binds its own
+// listener, so in native mode it can stop the native session and reload with ejs=1 instead.
+document.getElementById("p2").addEventListener(
+  "click",
+  async (ev) => {
+    if (!nativeMode) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.stopImmediatePropagation();
+    await stopNative();
+    const url = new URL(location.href);
+    url.searchParams.set("ejs", "1");
+    url.searchParams.set("p2", "1");
+    location.href = url.toString();
+  },
+  true,
+);
+
+// The native touch pad must not stay pressable under an HTML panel (PLAN §1.1). Watch every
+// overlay's `hidden`/class changes; anything visible hides the pad.
+const OVERLAY_IDS = ["tools-panel", "link", "join", "native-menu", "error"];
+let padVisible = true;
+function syncPad() {
+  if (!nativeMode) return;
+  const plugin = window.Capacitor?.Plugins?.NativePlayer;
+  if (!plugin) return;
+  const covered = OVERLAY_IDS.some((overlayId) => {
+    const el = document.getElementById(overlayId);
+    return el && !el.classList.contains("hidden") && !el.hidden;
+  });
+  if (covered === !padVisible) return;
+  padVisible = !covered;
+  Promise.resolve(plugin.setPadVisible({ visible: padVisible })).catch(() => {});
+}
+new MutationObserver(syncPad).observe(document.body, { attributes: true, attributeFilter: ["class", "hidden"], subtree: true });
+window.addEventListener("pagehide", () => {
+  if (nativeMode) stopNative();
 });
 
 async function lockOrientation(core) {
@@ -202,6 +253,12 @@ function boot(game, rom, onStart, gameId = id) {
       if (BROKEN_SHADERS.includes(emu.getSettingValue("shader"))) emu.changeSettingOption("shader", "sabr");
       bindComboButton(emu);
       if (onStart) onStart(emu);
+      // The native `#p2` reloads with ejs=1&p2=1 so host netplay runs on EmulatorJS; open the
+      // link panel exactly what a #p2 tap does today, once the game has started.
+      if (params.get("p2") === "1" && !p2AutoOpened) {
+        p2AutoOpened = true;
+        document.getElementById("p2").click();
+      }
     },
   });
   // Add our RetroArch settings the moment EmulatorJS defines its game manager. Patching it on the
@@ -243,6 +300,19 @@ if (params.has("join") && reloaded) {
     const rom = game && (await get("roms", id));
     if (!game || !rom) return fail(t("gameNotFound"));
     put("games", id, { ...game, played: Date.now() }).catch(() => {});
+    // iOS runs the game natively; everything else, and any plugin error, stays on EmulatorJS.
+    if (await useNative(game, params, rom)) {
+      nativeMode = true;
+      lockOrientation(game.core);
+      const fallback = () => {
+        nativeMode = false;
+        delete window.nbNative;
+        boot(game, rom);
+      };
+      // Extension point for the native menu (src/native-menu.js); it uses only these two.
+      window.nbNative = { plugin: window.Capacitor?.Plugins?.NativePlayer, game, onFallback: fallback };
+      return bootNative(game, rom, { pad: PADS[game.core], onFallback: fallback });
+    }
     boot(game, rom);
   })().catch((e) => fail(t("error", { msg: e.message || e })));
 }
