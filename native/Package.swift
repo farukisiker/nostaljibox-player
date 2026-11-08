@@ -39,12 +39,12 @@ var pluginDeps: [Target.Dependency] = [
     .product(name: "Capacitor", package: "capacitor-swift-pm"),
     .product(name: "Cordova", package: "capacitor-swift-pm"),
 ]
-// Input (touch pad + game controllers) and save files: whichever agent folder holds the module.
+// Input (touch pad + game controllers), save files, ZIP extraction: whichever agent folder holds the module.
 let agentFolders = ((try? FileManager.default.contentsOfDirectory(atPath: root + "/agents")) ?? [])
     .filter { exists("agents/\($0)") && !$0.hasPrefix(".") }.sorted()
 func folder(of module: String) -> String? { agentFolders.first { exists("agents/\($0)/\(module)") } }
 var moduleFolder: [String: String] = [:]
-for module in ["NativeInput", "NativeSaves"] {
+for module in ["NativeInput", "NativeSaves", "NativeZip"] {
     guard let owner = folder(of: module) else { continue }
     moduleFolder[module] = owner
     targets.append(.target(name: module, dependencies: ["LibretroHost"], path: "agents/\(owner)/\(module)"))
