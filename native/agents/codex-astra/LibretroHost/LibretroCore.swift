@@ -26,7 +26,7 @@ public final class LibretroCore {
         return info
     }
 
-    public init(executableURL: URL) throws {
+    public init(executableURL: URL, systemDirectory: URL? = nil, saveDirectory: URL? = nil) throws {
         Self.ownershipLock.lock()
         let available = !Self.occupied
         if available { Self.occupied = true }
@@ -42,8 +42,8 @@ public final class LibretroCore {
             }
             let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("NostaljiBox", isDirectory: true)
-            let system = root.appendingPathComponent("system", isDirectory: true)
-            let saves = root.appendingPathComponent("saves", isDirectory: true)
+            let system = systemDirectory ?? root.appendingPathComponent("system", isDirectory: true)
+            let saves = saveDirectory ?? root.appendingPathComponent("saves", isDirectory: true)
             try FileManager.default.createDirectory(at: system, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: saves, withIntermediateDirectories: true)
             guard nb_bridge_set_directories(system.path, saves.path), nb_bridge_init() else {
