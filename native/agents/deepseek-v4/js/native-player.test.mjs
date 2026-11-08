@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Run with: node --test src/native-player.test.mjs
+// Run with: node --test native/agents/deepseek-v4/js/native-player.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 import { containerOf, fnv1a64Hex, useNative, NATIVE_CONTAINERS } from "./native-player.js";

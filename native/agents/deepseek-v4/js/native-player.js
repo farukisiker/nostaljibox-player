@@ -2,7 +2,7 @@
 // JS side of the iOS native player bridge: decides whether a game can run in the native
 // player and boots it. Contract: docs/native-player/API.md §3, §4, §5, §8; plan: PLAN.md
 // §1.6, §2.3. Plain ES module, no dependencies, no build step.
-import { detectSystem } from "../shared/systems.js";
+import { detectSystem } from "../../../../shared/systems.js";
 
 // Archive types the native side can open. Kept in step with the plugin's `containers`.
 export const NATIVE_CONTAINERS = { zip: true, "7z": false };
