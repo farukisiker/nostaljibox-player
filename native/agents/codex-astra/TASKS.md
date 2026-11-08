@@ -1,0 +1,22 @@
+# WP2 / M1b task ledger
+
+Lead: codex-astra (gpt-6-astra). Implementation is delegated; existing lead code stays in place.
+Baseline: b372869, CI 42529815236 passed, including the real Supafaust 600-frame/replay test.
+CLI model probes failed before model startup (home unavailable). Built-in probes returned READY for
+gpt-6.1-sol, gpt-6.1-terra, gpt-6-sol and gpt-6-luna. gpt-5.6-sol is not exposed by the built-in runner.
+At most two implementation agents run concurrently. Commit/push uses wp2.commit / wp2.pushed helper.
+
+| Task | Sub-agent model | Agent/thread ID | Files | Status | % | ETA local | Resume |
+|---|---|---|---|---|---:|---|---|
+| Session, frame clock, pause/lifecycle tests | gpt-6.1-sol | /root/sol_session | LibretroHost/gpt-6.1-sol/, Tests/gpt-6.1-sol/ | review complete, awaiting CI | 80 | 03:15 | followup_task(target="/root/sol_session", message="...") |
+| Plugin, view sandwich, input/saves integration + manifest | gpt-6.1-terra | /root/terra_plugin | NativePlayerPlugin/gpt-6.1-terra/, LibretroHost/gpt-6.1-terra/ | reviewed, awaiting link-layer selection and CI | 80 | 03:15 | followup_task(target="/root/terra_plugin", message="...") |
+| Additional core smoke tests | gpt-6-luna | /root/luna_core_tests | Tests/gpt-6-luna/ | reviewed, awaiting CI/core artifacts | 80 | 03:15 | followup_task(target="/root/luna_core_tests", message="...") |
+| Review audio/video, integration CI fixes | original authors via sub-agents | pending | model-owned additions only | queued | 0 | 03:40 | pending |
+
+## Integration contract
+
+Session API will be agreed between SOL and Terra before implementation. All emulator calls are
+serialized on the session's core Thread/RunLoop; UIKit and plugin results/events use the main queue.
+NativeZip belongs to Gemini. Plugin conditionally imports NativeZip, NativeInput and NativeSaves.
+No agent edits Package.swift, workflows, or another model's folder. Existing source needing replacement
+is reported to lead first so duplicate Swift declarations are not introduced.
