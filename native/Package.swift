@@ -13,6 +13,14 @@ import PackageDescription
 let root = Context.packageDirectory
 func exists(_ path: String) -> Bool { FileManager.default.fileExists(atPath: root + "/" + path) }
 
+/// Metal shader sources under a module folder (any sub-agent sub-folder), relative to that folder.
+/// SwiftPM compiles them into the module's default.metallib (Bundle.module).
+func metalFiles(in module: String) -> [String] {
+    let base = root + "/" + module
+    guard let walker = FileManager.default.enumerator(atPath: base) else { return [] }
+    return walker.compactMap { $0 as? String }.filter { $0.hasSuffix(".metal") }.sorted()
+}
+
 struct CoreRelease: Decodable { let url: String; let checksum: String }
 struct Release: Decodable { let cores: [String: CoreRelease] }
 let releasePath = root + "/agents/gemini-argon/ios-cores/release.json"
@@ -23,7 +31,8 @@ let cores = (release?.cores ?? [:]).sorted { $0.key < $1.key }
 var targets: [Target] = [
     // codex-astra: C bridge to the libretro API, core loader, emulation session, video, audio.
     .target(name: "LibretroC", path: "agents/codex-astra/LibretroC", publicHeadersPath: "include"),
-    .target(name: "LibretroHost", dependencies: ["LibretroC"], path: "agents/codex-astra/LibretroHost"),
+    .target(name: "LibretroHost", dependencies: ["LibretroC"], path: "agents/codex-astra/LibretroHost",
+            resources: metalFiles(in: "agents/codex-astra/LibretroHost").map { .process($0) }),
 ]
 var pluginDeps: [Target.Dependency] = [
     "LibretroHost",

@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The real `PADS.snes` and `PADS.nes` tables of src/play.js, as `JSON.stringify` prints them
+// (API.md §5: the plugin receives exactly this array). Regenerate when play.js changes the pads.
+enum PadFixtures {
+    static let snes = #"""
+    [{"type":"zone","id":"dpad","location":"left","left":"50%","top":"50%","joystickInput":false,"inputValues":[4,5,6,7],"color":"#ffffff"},{"type":"button","location":"right","bold":true,"left":40,"top":0,"text":"X","id":"face0","input_value":9},{"type":"button","location":"right","bold":true,"left":0,"top":40,"text":"Y","id":"face1","input_value":1},{"type":"button","location":"right","bold":true,"left":81,"top":40,"text":"A","id":"face2","input_value":8},{"type":"button","location":"right","bold":true,"left":40,"top":80,"text":"B","id":"face3","input_value":0},{"type":"button","text":"L","id":"l","location":"left","left":3,"top":-55,"bold":true,"block":true,"input_value":10},{"type":"button","text":"R","id":"r","location":"right","right":3,"top":-45,"bold":true,"block":true,"input_value":11},{"type":"button","text":"Select","id":"center0","location":"center","left":-2.5,"fontSize":15,"block":true,"input_value":2},{"type":"button","text":"Start","id":"center1","location":"center","left":62.5,"fontSize":15,"block":true,"input_value":3}]
+    """#
+    static let nes = #"""
+    [{"type":"zone","id":"dpad","location":"left","left":"50%","top":"50%","joystickInput":false,"inputValues":[4,5,6,7],"color":"#ffffff"},{"type":"button","location":"right","bold":true,"left":40,"top":0,"text":"A+B","id":"ab","fontSize":18,"input_value":8},{"type":"button","location":"right","bold":true,"left":0,"top":40,"text":"","id":"blank1","input_value":15},{"type":"button","location":"right","bold":true,"left":81,"top":40,"text":"A","id":"face2","input_value":8},{"type":"button","location":"right","bold":true,"left":40,"top":80,"text":"B","id":"face3","input_value":0},{"type":"button","text":"Select","id":"center0","location":"center","left":-2.5,"fontSize":15,"block":true,"input_value":2},{"type":"button","text":"Start","id":"center1","location":"center","left":62.5,"fontSize":15,"block":true,"input_value":3}]
+    """#
+}
