@@ -1,0 +1,11 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Native player (iOS): the WebView sits transparent over the native video view, so the page
+   background AND body's gradient must go (play.css paints both html and body). #game holds
+   EmulatorJS's canvas, which native mode does not use. Class is set on <html> by native-mode.js. */
+html.native,
+html.native body {
+  background: transparent !important;
+}
+html.native #game {
+  display: none !important;
+}
