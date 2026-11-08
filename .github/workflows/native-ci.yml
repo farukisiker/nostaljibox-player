@@ -2,12 +2,12 @@ name: Native player CI
 
 # Builds the native player Swift package (player/native) for the iOS simulator and runs its tests.
 # This repo is public, so macOS minutes are free; the private app repo only builds TestFlight.
-# Owner: WP0 (see docs/native-player/PLAN.md in the app repo). Initial version by the lead architect.
+# Link layer (owner: Claude). Agent code lives in native/agents/<model>/, see native/agents/README.md.
 
 on:
   push:
     branches: [native-player, "np/**"]
-    paths: [native/**, tools/ios-cores/cores.lock.json, .github/workflows/native-ci.yml]
+    paths: [native/**, .github/workflows/native-ci.yml]
   workflow_dispatch:
 
 concurrency:
@@ -28,17 +28,18 @@ jobs:
       - name: Check for the package
         id: pkg
         run: |
-          if [ -f native/Package.swift ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "::notice::native/Package.swift not there yet"; fi
+          if [ -f native/Package.swift ] && [ -d native/agents/codex-astra/LibretroHost ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "::notice::native package not there yet"; fi
       # Cores come from this repo's release ios-cores-<LOCKHASH>, LOCKHASH = first 12 hex chars of
-      # sha256(tools/ios-cores/cores.lock.json). Tests that need a core skip when it is missing.
+      # sha256(native/agents/gemini-argon/ios-cores/cores.lock.json). Tests that need a core skip when it is missing.
       - name: Fetch simulator cores
         if: steps.pkg.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/cores"
-          if [ -f tools/ios-cores/cores.lock.json ]; then
-            LOCKHASH=$(shasum -a 256 tools/ios-cores/cores.lock.json | cut -c1-12)
+          LOCK=native/agents/gemini-argon/ios-cores/cores.lock.json
+          if [ -f "$LOCK" ]; then
+            LOCKHASH=$(shasum -a 256 "$LOCK" | cut -c1-12)
             if gh release view "ios-cores-$LOCKHASH" >/dev/null 2>&1; then
               gh release download "ios-cores-$LOCKHASH" -p '*.xcframework.zip' -D "$RUNNER_TEMP/zips"
               for z in "$RUNNER_TEMP"/zips/*.zip; do unzip -q "$z" -d "$RUNNER_TEMP/xcf"; done
@@ -62,6 +63,7 @@ jobs:
           echo "scheme=$SCHEME udid=$UDID"
           # TEST_RUNNER_<NAME> environment variables reach the test process as <NAME>.
           export TEST_RUNNER_NB_CORES_DIR="$NB_CORES_DIR"
+          export TEST_RUNNER_NB_FIXTURES_DIR="$GITHUB_WORKSPACE/native/agents/gemini-argon/fixtures"
           rc=0
           xcodebuild test -scheme "$SCHEME" -destination "platform=iOS Simulator,id=$UDID"             -resultBundlePath "$RUNNER_TEMP/tests.xcresult" > "$RUNNER_TEMP/xcodebuild.log" 2>&1 || rc=$?
           grep -E "error:|warning: unhandled|Test Case|Executed|BUILD|\*\*" "$RUNNER_TEMP/xcodebuild.log" | tail -200 || true

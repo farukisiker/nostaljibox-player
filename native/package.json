@@ -1,0 +1,12 @@
+{
+  "name": "nostaljibox-native-player",
+  "version": "0.1.0",
+  "description": "Native libretro player for NostaljiBox on iOS (Capacitor plugin). Code by several AI agents, one folder each under agents/.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "agents/codex-astra/web/index.js",
+  "module": "agents/codex-astra/web/index.js",
+  "files": ["Package.swift", "agents/"],
+  "peerDependencies": { "@capacitor/core": ">=8.0.0" },
+  "capacitor": { "ios": { "src": "agents" } }
+}
