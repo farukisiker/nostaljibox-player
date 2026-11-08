@@ -30,9 +30,15 @@ var pluginDeps: [Target.Dependency] = [
     .product(name: "Capacitor", package: "capacitor-swift-pm"),
     .product(name: "Cordova", package: "capacitor-swift-pm"),
 ]
-// deepseek-v4: touch pad + game controllers, save files.
-for module in ["NativeInput", "NativeSaves"] where exists("agents/deepseek-v4/\(module)") {
-    targets.append(.target(name: module, dependencies: ["LibretroHost"], path: "agents/deepseek-v4/\(module)"))
+// Input (touch pad + game controllers) and save files: whichever agent folder holds the module.
+let agentFolders = ((try? FileManager.default.contentsOfDirectory(atPath: root + "/agents")) ?? [])
+    .filter { exists("agents/\($0)") && !$0.hasPrefix(".") }.sorted()
+func folder(of module: String) -> String? { agentFolders.first { exists("agents/\($0)/\(module)") } }
+var moduleFolder: [String: String] = [:]
+for module in ["NativeInput", "NativeSaves"] {
+    guard let owner = folder(of: module) else { continue }
+    moduleFolder[module] = owner
+    targets.append(.target(name: module, dependencies: ["LibretroHost"], path: "agents/\(owner)/\(module)"))
     pluginDeps.append(.target(name: module))
 }
 // gemini-argon: prebuilt cores (dynamic xcframeworks, opened with dlopen by path).
@@ -45,14 +51,12 @@ targets.append(.target(name: "NativePlayerPlugin", dependencies: pluginDeps,
                        path: "agents/codex-astra/NativePlayerPlugin",
                        resources: exists("agents/codex-astra/NativePlayerPlugin/cores-manifest.json")
                            ? [.copy("cores-manifest.json")] : []))
-// Tests, one target per agent. Fixtures are read from NB_FIXTURES_DIR (agents/gemini-argon/fixtures).
-if exists("agents/codex-astra/Tests") {
-    targets.append(.testTarget(name: "CodexAstraTests", dependencies: ["LibretroHost"], path: "agents/codex-astra/Tests"))
-}
-if exists("agents/deepseek-v4/Tests") {
-    let deps: [Target.Dependency] = ["NativeInput", "NativeSaves"].filter { exists("agents/deepseek-v4/\($0)") }
-        .map { .target(name: $0) } + ["LibretroHost"]
-    targets.append(.testTarget(name: "DeepseekV4Tests", dependencies: deps, path: "agents/deepseek-v4/Tests"))
+// Tests, one target per agent folder (agents/<folder>/Tests → <Folder>Tests). Fixtures are read from
+// NB_FIXTURES_DIR (agents/gemini-argon/fixtures).
+for owner in agentFolders where exists("agents/\(owner)/Tests") {
+    let name = owner.split(separator: "-").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined() + "Tests"
+    let own: [Target.Dependency] = moduleFolder.filter { $0.value == owner }.keys.sorted().map { .target(name: $0) }
+    targets.append(.testTarget(name: name, dependencies: own + ["LibretroHost"], path: "agents/\(owner)/Tests"))
 }
 
 let package = Package(
