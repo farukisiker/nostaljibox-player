@@ -11,6 +11,16 @@ on:
       cores:
         description: JSON list of cores to build (default all)
         required: false
+      emsdk:
+        description: Emscripten version (default 3.1.74)
+        required: false
+      retroarch:
+        description: EmulatorJS RetroArch commit (default a61f8a8905)
+        required: false
+      publish:
+        description: Commit the built cores to cores/dist (set false for test builds)
+        required: false
+        default: "true"
   push:
     branches: [main]
     paths: [.github/workflows/build-cores.yml, cores/extra-cores.json]
@@ -31,7 +41,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq p7zip-full binutils-mips-linux-gnu build-essential pkgconf python3 zip libsdl2-dev
       - uses: mymindstorm/setup-emsdk@v14
         with:
-          version: 3.1.74
+          version: ${{ inputs.emsdk || '3.1.74' }}
       # The app ships EmulatorJS 4.2.3. Newer build scripts and RetroArch (May 2026+) produce cores
       # that require EmulatorJS 4.3.0, so pin both to the last 4.2.x-compatible revisions:
       # build scripts 6c0dc2e (minimumEJSVersion 4.2.2), RetroArch `next` at a61f8a8905 (its head from Oct 2025 to Feb 2026).
@@ -43,7 +53,7 @@ jobs:
           git -C ejs-build checkout 6c0dc2e
           mkdir -p ejs-build/compile
           git clone -b next https://github.com/EmulatorJS/RetroArch.git ejs-build/compile/RetroArch
-          git -C ejs-build/compile/RetroArch checkout a61f8a8905
+          git -C ejs-build/compile/RetroArch checkout ${{ inputs.retroarch || 'a61f8a8905' }}
           git clone -b v4.2.3 --depth 1 https://github.com/EmulatorJS/EmulatorJS.git ejs-build/compile/RetroArch/EmulatorJS
           git -C ejs-build/compile/RetroArch/EmulatorJS checkout --detach
           jq -s '.[0] + .[1]' ejs-build/cores.json cores/extra-cores.json > ejs-build/cores.merged.json
@@ -95,14 +105,14 @@ jobs:
         run: tail -n 200 ejs-build/output/logs/* 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
-          name: core-${{ matrix.core }}
+          name: core-${{ matrix.core }}-${{ inputs.emsdk || '3.1.74' }}-${{ inputs.retroarch || 'a61f8a8905' }}
           path: |
             ejs-build/output/*.data
             ejs-build/output/reports/*.json
 
   publish:
     needs: build
-    if: always()
+    if: always() && inputs.publish != 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
