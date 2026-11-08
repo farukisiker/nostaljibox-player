@@ -1,0 +1,65 @@
+// swift-tools-version: 5.9
+//
+// Link layer for the native player (owner: Claude, lead architect). Every model writes its own code
+// under agents/<model>/; this manifest only wires those folders together. Who wrote what, and how to
+// ask them: docs/native-player/AGENTS.md in the app repo, and agents/README.md here.
+//
+// A module is added only once its folder exists, so agents can land their work at different times.
+// Prebuilt cores come from agents/gemini-argon/ios-cores/release.json once that agent has published
+// them as a GitHub release ({"cores": {"supafaust": {"url": "...zip", "checksum": "..."}}}).
+import Foundation
+import PackageDescription
+
+let root = Context.packageDirectory
+func exists(_ path: String) -> Bool { FileManager.default.fileExists(atPath: root + "/" + path) }
+
+struct CoreRelease: Decodable { let url: String; let checksum: String }
+struct Release: Decodable { let cores: [String: CoreRelease] }
+let releasePath = root + "/agents/gemini-argon/ios-cores/release.json"
+let release = (try? Data(contentsOf: URL(fileURLWithPath: releasePath)))
+    .flatMap { try? JSONDecoder().decode(Release.self, from: $0) }
+let cores = (release?.cores ?? [:]).sorted { $0.key < $1.key }
+
+var targets: [Target] = [
+    // codex-astra: C bridge to the libretro API, core loader, emulation session, video, audio.
+    .target(name: "LibretroC", path: "agents/codex-astra/LibretroC", publicHeadersPath: "include"),
+    .target(name: "LibretroHost", dependencies: ["LibretroC"], path: "agents/codex-astra/LibretroHost"),
+]
+var pluginDeps: [Target.Dependency] = [
+    "LibretroHost",
+    .product(name: "Capacitor", package: "capacitor-swift-pm"),
+    .product(name: "Cordova", package: "capacitor-swift-pm"),
+]
+// deepseek-v4: touch pad + game controllers, save files.
+for module in ["NativeInput", "NativeSaves"] where exists("agents/deepseek-v4/\(module)") {
+    targets.append(.target(name: module, dependencies: ["LibretroHost"], path: "agents/deepseek-v4/\(module)"))
+    pluginDeps.append(.target(name: module))
+}
+// gemini-argon: prebuilt cores (dynamic xcframeworks, opened with dlopen by path).
+for (name, core) in cores {
+    targets.append(.binaryTarget(name: name, url: core.url, checksum: core.checksum))
+    pluginDeps.append(.target(name: name))
+}
+// codex-astra: the Capacitor plugin (the only @objc class in this package).
+targets.append(.target(name: "NativePlayerPlugin", dependencies: pluginDeps,
+                       path: "agents/codex-astra/NativePlayerPlugin",
+                       resources: exists("agents/codex-astra/NativePlayerPlugin/cores-manifest.json")
+                           ? [.copy("cores-manifest.json")] : []))
+// Tests, one target per agent. Fixtures are read from NB_FIXTURES_DIR (agents/gemini-argon/fixtures).
+if exists("agents/codex-astra/Tests") {
+    targets.append(.testTarget(name: "CodexAstraTests", dependencies: ["LibretroHost"], path: "agents/codex-astra/Tests"))
+}
+if exists("agents/deepseek-v4/Tests") {
+    let deps: [Target.Dependency] = ["NativeInput", "NativeSaves"].filter { exists("agents/deepseek-v4/\($0)") }
+        .map { .target(name: $0) } + ["LibretroHost"]
+    targets.append(.testTarget(name: "DeepseekV4Tests", dependencies: deps, path: "agents/deepseek-v4/Tests"))
+}
+
+let package = Package(
+    name: "NostaljiboxNativePlayer",
+    platforms: [.iOS(.v15)],
+    products: [.library(name: "NostaljiboxNativePlayer", targets: ["NativePlayerPlugin"])],
+    dependencies: [.package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", from: "8.0.0")],
+    targets: targets,
+    cLanguageStandard: .c11
+)
