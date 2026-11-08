@@ -5,6 +5,8 @@ import { setupHostLink } from "./host-link.js";
 import { setupGuestLink } from "./guest-link.js";
 import { t, ejsLanguage, translatePage } from "../shared/i18n.js";
 import "./play.css";
+import { installNativeMode, autoOpenHostLink } from "../native/agents/sonnet-5-5/js/native-mode.js";
+import "../native/agents/sonnet-5-5/native.css";
 
 translatePage();
 
@@ -202,6 +204,7 @@ function boot(game, rom, onStart, gameId = id) {
       if (BROKEN_SHADERS.includes(emu.getSettingValue("shader"))) emu.changeSettingOption("shader", "sabr");
       bindComboButton(emu);
       if (onStart) onStart(emu);
+      autoOpenHostLink({ params });
     },
   });
   // Add our RetroArch settings the moment EmulatorJS defines its game manager. Patching it on the
@@ -243,6 +246,7 @@ if (params.has("join") && reloaded) {
     const rom = game && (await get("roms", id));
     if (!game || !rom) return fail(t("gameNotFound"));
     put("games", id, { ...game, played: Date.now() }).catch(() => {});
+    if (await installNativeMode({ params, game, rom, PADS, lockOrientation, bootEmulator: () => boot(game, rom) })) return;
     boot(game, rom);
   })().catch((e) => fail(t("error", { msg: e.message || e })));
 }
