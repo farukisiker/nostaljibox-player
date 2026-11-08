@@ -1,0 +1,17 @@
+{
+  "clownmdemu": {
+    "repo": "https://github.com/Clownacy/clownmdemu-libretro",
+    "commit": "d43c2708b0a31c285ce16724b6c4a2e92af07346",
+    "dir": ".",
+    "makefile": "Makefile",
+    "args": [
+      "PLATFORM_DEFINES=-DCLOWNCD_NO_CHD"
+    ],
+    "output": "clownmdemu_libretro_ios.dylib",
+    "systems": [
+      "segaMD"
+    ],
+    "license": "AGPL-3.0-or-later",
+    "licenseUrl": "https://raw.githubusercontent.com/Clownacy/clownmdemu-libretro/d43c2708b0a31c285ce16724b6c4a2e92af07346/LICENCE.txt"
+  }
+}

@@ -1,0 +1,40 @@
+diff --git a/Makefile b/Makefile
+index 72d682e..524c843 100644
+--- a/Makefile
++++ b/Makefile
+@@ -113,13 +113,18 @@ ifeq ($(platform),ios-arm64)
+ else
+ 	CC = cc -arch armv7 -isysroot $(IOSSDK)
+ endif
+-ifeq ($(platform),$(filter $(platform),ios9 ios-arm64))
+-   SHARED += -miphoneos-version-min=8.0
+-   CC +=  -miphoneos-version-min=8.0
++ifeq ($(MINVERSION),)
++ifneq ($(IPHONEMINVER),)
++   MINVERSION := $(IPHONEMINVER)
++else ifeq ($(platform),$(filter $(platform),ios9 ios-arm64))
++   MINVERSION = -miphoneos-version-min=8.0
+ else
+-   SHARED += -miphoneos-version-min=5.0
+-   CC +=  -miphoneos-version-min=5.0
++   MINVERSION = -miphoneos-version-min=5.0
+ endif
++endif
++   SHARED += $(MINVERSION)
++   CC +=  $(MINVERSION)
++   CFLAGS += -std=gnu99
+ 
+ else ifeq ($(platform), tvos-arm64)
+    EXT?=dylib
+@@ -667,6 +672,11 @@ include $(THEOS_MAKE_PATH)/library.mk
+ else
+ all: $(TARGET)
+ 
++$(OBJECTS): | common/unity.c
++
++common/unity.c:
++	git submodule update --init --recursive
++
+ $(TARGET): $(OBJECTS) 
+ ifeq ($(STATIC_LINKING), 1)
+ ifneq (,$(findstring msvc,$(platform)))

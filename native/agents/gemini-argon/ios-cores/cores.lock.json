@@ -11,6 +11,49 @@
     "systems": [
       "snes"
     ],
-    "license": "GPL-2.0"
+    "license": "GPL-2.0-or-later",
+    "licenseUrl": "https://raw.githubusercontent.com/libretro/supafaust/642d1d1b6684aa7e306a02a89885f3f5456a5157/COPYING"
+  },
+  "nestopia": {
+    "repo": "https://github.com/libretro/nestopia",
+    "commit": "f1e02d12664834536edbf7352995a3d0cd1caef4",
+    "dir": "libretro",
+    "makefile": "Makefile",
+    "args": [],
+    "output": "nestopia_libretro_ios.dylib",
+    "systems": [
+      "nes"
+    ],
+    "license": "GPL-2.0-or-later",
+    "licenseUrl": "https://raw.githubusercontent.com/libretro/nestopia/f1e02d12664834536edbf7352995a3d0cd1caef4/COPYING"
+  },
+  "clownmdemu": {
+    "repo": "https://github.com/Clownacy/clownmdemu-libretro",
+    "commit": "d43c2708b0a31c285ce16724b6c4a2e92af07346",
+    "dir": ".",
+    "makefile": "Makefile",
+    "args": [
+      "PLATFORM_DEFINES=-DCLOWNCD_NO_CHD"
+    ],
+    "output": "clownmdemu_libretro_ios.dylib",
+    "systems": [
+      "segaMD"
+    ],
+    "license": "AGPL-3.0-or-later",
+    "licenseUrl": "https://raw.githubusercontent.com/Clownacy/clownmdemu-libretro/d43c2708b0a31c285ce16724b6c4a2e92af07346/LICENCE.txt"
+  },
+  "gearsystem": {
+    "repo": "https://github.com/drhelius/Gearsystem",
+    "commit": "1be9a12b82cae84ddd6f9b7006d546abe2d58bd4",
+    "dir": "platforms/libretro",
+    "makefile": "Makefile",
+    "args": [],
+    "output": "gearsystem_libretro_ios.dylib",
+    "systems": [
+      "segaMS",
+      "segaGG"
+    ],
+    "license": "GPL-3.0-or-later",
+    "licenseUrl": "https://raw.githubusercontent.com/drhelius/Gearsystem/1be9a12b82cae84ddd6f9b7006d546abe2d58bd4/LICENSE"
   }
 }
