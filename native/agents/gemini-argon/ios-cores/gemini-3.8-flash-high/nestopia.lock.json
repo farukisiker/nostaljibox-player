@@ -1,0 +1,15 @@
+{
+  "nestopia": {
+    "repo": "https://github.com/libretro/nestopia",
+    "commit": "f1e02d12664834536edbf7352995a3d0cd1caef4",
+    "dir": "libretro",
+    "makefile": "Makefile",
+    "args": [],
+    "output": "nestopia_libretro_ios.dylib",
+    "systems": [
+      "nes"
+    ],
+    "license": "GPL-2.0-or-later",
+    "licenseUrl": "https://raw.githubusercontent.com/libretro/nestopia/f1e02d12664834536edbf7352995a3d0cd1caef4/COPYING"
+  }
+}

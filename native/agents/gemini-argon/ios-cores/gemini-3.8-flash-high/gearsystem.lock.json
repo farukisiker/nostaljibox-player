@@ -1,0 +1,16 @@
+{
+  "gearsystem": {
+    "repo": "https://github.com/drhelius/Gearsystem",
+    "commit": "1be9a12b82cae84ddd6f9b7006d546abe2d58bd4",
+    "dir": "platforms/libretro",
+    "makefile": "Makefile",
+    "args": [],
+    "output": "gearsystem_libretro_ios.dylib",
+    "systems": [
+      "segaMS",
+      "segaGG"
+    ],
+    "license": "GPL-3.0-or-later",
+    "licenseUrl": "https://raw.githubusercontent.com/drhelius/Gearsystem/1be9a12b82cae84ddd6f9b7006d546abe2d58bd4/LICENSE"
+  }
+}
