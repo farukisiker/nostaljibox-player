@@ -1,0 +1,163 @@
+name: Build iOS Libretro Cores
+
+# Builds libretro cores for iOS (device + simulator arm64, minos 15.0) from
+# native/agents/gemini-argon/ios-cores/cores.lock.json, wraps them into signed-ready
+# XCFrameworks, and publishes them to the repo's GitHub Release ios-cores-<LOCKHASH>.
+# Owner: gemini-argon (WP0).
+
+on:
+  push:
+    branches: [native-player, "np/**"]
+    paths:
+      - "native/agents/gemini-argon/ios-cores/**"
+      - ".github/workflows/ios-cores.yml"
+  workflow_dispatch:
+    inputs:
+      cores:
+        description: "JSON list of cores to build (default: all keys of cores.lock.json)"
+        required: false
+        default: ""
+        type: string
+      publish:
+        description: "Publish built XCFrameworks to GitHub Release ios-cores-<LOCKHASH>"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-cores-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      cores: ${{ steps.meta.outputs.cores }}
+      lockhash: ${{ steps.meta.outputs.lockhash }}
+      publish: ${{ steps.meta.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute lockhash and core matrix
+        id: meta
+        env:
+          INPUT_CORES: ${{ inputs.cores }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: |
+          LOCK="native/agents/gemini-argon/ios-cores/cores.lock.json"
+          LOCKHASH=$(shasum -a 256 "$LOCK" | cut -c1-12)
+          echo "lockhash=$LOCKHASH" >> "$GITHUB_OUTPUT"
+          echo "LOCKHASH=$LOCKHASH"
+
+          CORES=$(python3 - "$LOCK" "$INPUT_CORES" <<'PY'
+          import json, sys
+          lock_path, raw = sys.argv[1], sys.argv[2].strip()
+          with open(lock_path, "r", encoding="utf-8") as f:
+              lock = json.load(f)
+          if not raw or raw == "all":
+              cores = list(lock.keys())
+          else:
+              cores = json.loads(raw)
+              if not isinstance(cores, list) or not cores:
+                  raise SystemExit("inputs.cores must be a non-empty JSON list")
+              for c in cores:
+                  if c not in lock:
+                      raise SystemExit(f"Unknown core in inputs.cores: {c}")
+          print(json.dumps(cores))
+          PY
+          )
+          echo "cores=$CORES" >> "$GITHUB_OUTPUT"
+          echo "CORES=$CORES"
+
+          if [ "$INPUT_PUBLISH" = "false" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: prepare
+    runs-on: macos-26
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        core: ${{ fromJson(needs.prepare.outputs.cores) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Build device and simulator slices
+        run: |
+          CORE="${{ matrix.core }}"
+          SCRIPTS="native/agents/gemini-argon/ios-cores"
+          bash "$SCRIPTS/build-core.sh" "$CORE" device "$RUNNER_TEMP/slices/$CORE/device"
+          bash "$SCRIPTS/build-core.sh" "$CORE" simulator "$RUNNER_TEMP/slices/$CORE/simulator"
+          bash "$SCRIPTS/make-framework.sh" "$CORE" \
+            "$RUNNER_TEMP/slices/$CORE/device/${CORE}.dylib" \
+            "$RUNNER_TEMP/slices/$CORE/simulator/${CORE}.dylib" \
+            "$RUNNER_TEMP/dist/$CORE"
+      - name: Upload core artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-core-${{ matrix.core }}
+          path: |
+            ${{ runner.temp }}/dist/${{ matrix.core }}/${{ matrix.core }}.xcframework.zip
+            ${{ runner.temp }}/dist/${{ matrix.core }}/checksums.txt
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download built core artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ios-core-*
+          path: ${{ runner.temp }}/artifacts
+      - name: Assemble release assets and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCKHASH: ${{ needs.prepare.outputs.lockhash }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          find "$RUNNER_TEMP/artifacts" -name '*.xcframework.zip' -exec cp {} "$RUNNER_TEMP/release/" \;
+          find "$RUNNER_TEMP/artifacts" -name 'checksums.txt' -exec cat {} + | sort -u > "$RUNNER_TEMP/release/checksums.txt"
+
+          echo "=== Release tag: ios-cores-$LOCKHASH ==="
+          ls -la "$RUNNER_TEMP/release"
+          echo "=== checksums.txt ==="
+          cat "$RUNNER_TEMP/release/checksums.txt"
+
+          {
+            echo "### iOS Cores Release \`ios-cores-$LOCKHASH\`"
+            echo ""
+            echo "\`\`\`"
+            cat "$RUNNER_TEMP/release/checksums.txt"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          TAG="ios-cores-$LOCKHASH"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$RUNNER_TEMP/release"/*.xcframework.zip "$RUNNER_TEMP/release/checksums.txt" --clobber
+          else
+            gh release create "$TAG" "$RUNNER_TEMP/release"/*.xcframework.zip "$RUNNER_TEMP/release/checksums.txt" \
+              --target "${{ github.sha }}" \
+              --title "$TAG" \
+              --notes "Prebuilt iOS (arm64 device + simulator, minos 15.0) libretro core XCFrameworks for cores.lock.json ($LOCKHASH)."
+          fi
+      - name: Upload combined release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-cores-${{ needs.prepare.outputs.lockhash }}
+          path: |
+            ${{ runner.temp }}/release/*.xcframework.zip
+            ${{ runner.temp }}/release/checksums.txt
+          if-no-files-found: error
