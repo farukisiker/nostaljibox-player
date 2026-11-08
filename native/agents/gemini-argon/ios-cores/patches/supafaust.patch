@@ -1,0 +1,12 @@
+diff --git a/mednafen/config.h b/mednafen/config.h
+--- a/mednafen/config.h
++++ b/mednafen/config.h
+@@ -4,7 +4,7 @@
+ #define MDFN_SNES_FAUST_SKETCHYSPC700OPT 1
+ //#define MDFN_SNES_FAUST_SKETCHYPPUOPT 1
+ 
+-#if !defined(__SWITCH__) && !defined(HAVE_LIBNX)
++#if !defined(__APPLE__) && !defined(__SWITCH__) && !defined(HAVE_LIBNX)
+ #define HAVE_SEM_TIMEDWAIT 1
+ #endif
+ 

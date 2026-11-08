@@ -1,0 +1,16 @@
+{
+  "supafaust": {
+    "repo": "https://github.com/libretro/supafaust",
+    "commit": "642d1d1b6684aa7e306a02a89885f3f5456a5157",
+    "dir": ".",
+    "makefile": "Makefile",
+    "args": [
+      "NO_GCC=1"
+    ],
+    "output": "mednafen_supafaust_libretro_ios.dylib",
+    "systems": [
+      "snes"
+    ],
+    "license": "GPL-2.0"
+  }
+}
