@@ -1,0 +1,76 @@
+name: Native player CI
+
+# Builds the native player Swift package (player/native) for the iOS simulator and runs its tests.
+# This repo is public, so macOS minutes are free; the private app repo only builds TestFlight.
+# Owner: WP0 (see docs/native-player/PLAN.md in the app repo). Initial version by the lead architect.
+
+on:
+  push:
+    branches: [native-player, "np/**"]
+    paths: [native/**, tools/ios-cores/cores.lock.json, .github/workflows/native-ci.yml]
+  workflow_dispatch:
+
+concurrency:
+  group: native-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Check for the package
+        id: pkg
+        run: |
+          if [ -f native/Package.swift ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "::notice::native/Package.swift not there yet"; fi
+      # Cores come from this repo's release ios-cores-<LOCKHASH>, LOCKHASH = first 12 hex chars of
+      # sha256(tools/ios-cores/cores.lock.json). Tests that need a core skip when it is missing.
+      - name: Fetch simulator cores
+        if: steps.pkg.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/cores"
+          if [ -f tools/ios-cores/cores.lock.json ]; then
+            LOCKHASH=$(shasum -a 256 tools/ios-cores/cores.lock.json | cut -c1-12)
+            if gh release view "ios-cores-$LOCKHASH" >/dev/null 2>&1; then
+              gh release download "ios-cores-$LOCKHASH" -p '*.xcframework.zip' -D "$RUNNER_TEMP/zips"
+              for z in "$RUNNER_TEMP"/zips/*.zip; do unzip -q "$z" -d "$RUNNER_TEMP/xcf"; done
+              for f in "$RUNNER_TEMP"/xcf/*.xcframework; do
+                n=$(basename "$f" .xcframework)
+                cp -R "$f"/ios-arm64*-simulator/"$n".framework "$RUNNER_TEMP/cores/"
+              done
+            else
+              echo "::notice::no release ios-cores-$LOCKHASH yet"
+            fi
+          fi
+          ls -la "$RUNNER_TEMP/cores"
+          echo "NB_CORES_DIR=$RUNNER_TEMP/cores" >> "$GITHUB_ENV"
+      - name: Build and test
+        if: steps.pkg.outputs.present == 'true'
+        working-directory: native
+        run: |
+          xcodebuild -list
+          SCHEME=$(xcodebuild -list -json | python3 -c 'import json,sys; d=json.load(sys.stdin); s=(d.get("workspace") or d.get("project") or {}).get("schemes",[]); print(next((x for x in s if x.endswith("-Package")), s[0] if s else ""))')
+          UDID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k,v in sorted(d.items(), reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")))')
+          echo "scheme=$SCHEME udid=$UDID"
+          # TEST_RUNNER_<NAME> environment variables reach the test process as <NAME>.
+          export TEST_RUNNER_NB_CORES_DIR="$NB_CORES_DIR"
+          set -o pipefail
+          xcodebuild test -scheme "$SCHEME" -destination "platform=iOS Simulator,id=$UDID" \
+            -resultBundlePath "$RUNNER_TEMP/tests.xcresult" 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E "error:|warning: unhandled|Test Case|Executed|BUILD|\*\*" || true
+          test "${PIPESTATUS[0]}" = 0
+      - name: Upload logs
+        if: always() && steps.pkg.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ci-logs
+          path: |
+            ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: ignore
