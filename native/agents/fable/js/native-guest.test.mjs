@@ -154,6 +154,25 @@ test("no native core for the system / no plugin: onError, nothing started", asyn
   assert.deepEqual(errors2, ["unavailable"]);
 });
 
+test("#emu-menu (EmulatorJS menu, dead on a native guest page) is hidden while the guest runs natively and restored on stop", async () => {
+  const plugin = guestPlugin();
+  const { win, doc } = env(plugin);
+  const menuButton = { id: "emu-menu", style: { display: "" } };
+  doc.getElementById = (id) => (id === "emu-menu" ? menuButton : null);
+  await bootNativeGuest(GAME, BYTES, { win, doc });
+  assert.equal(menuButton.style.display, "none", "hidden once the game runs (inline: play.css sets display:flex)");
+  await stopNativeGuest();
+  assert.equal(menuButton.style.display, "", "back as it was");
+
+  // A failed start never hides it.
+  const failing = guestPlugin();
+  failing.fail.start = { code: "core-load", message: "no" };
+  const e2 = env(failing);
+  e2.doc.getElementById = (id) => (id === "emu-menu" ? menuButton : null);
+  await bootNativeGuest(GAME, BYTES, { win: e2.win, doc: e2.doc, onError: () => {} });
+  assert.equal(menuButton.style.display, "");
+});
+
 test("a plugin error during the game reports onError once; stopNativeGuest stops and deletes the link copy", async () => {
   const plugin = guestPlugin();
   const { win, doc, classes } = env(plugin);

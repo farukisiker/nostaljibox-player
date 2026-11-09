@@ -48,6 +48,19 @@ function watchOverlays(plugin, doc, win) {
   return () => observer.disconnect();
 }
 
+// The tools panel's "game menu" button opens EmulatorJS's menu, which does not exist on a native
+// guest page (no native menu either: it is the host page's, N0-f OPEN 2). Hide it while the native
+// guest runs; the inline style wins over play.css's `display: flex`. Returns the restore function.
+function hideMenuButton(doc) {
+  const button = doc?.getElementById?.("emu-menu");
+  if (!button || !button.style) return () => {};
+  const before = button.style.display;
+  button.style.display = "none";
+  return () => {
+    button.style.display = before;
+  };
+}
+
 /**
  * Opens the host's game in the native player as the guest.
  *
@@ -80,9 +93,12 @@ export async function bootNativeGuest(game, bytes, { onStarted, onError, pad, wi
     errorHandle = null;
   }
   let unwatch = () => {};
+  let showMenu = () => {};
   const cleanup = () => {
     unwatch();
     unwatch = () => {};
+    showMenu();
+    showMenu = () => {};
     doc?.documentElement?.classList?.remove("native");
     Promise.resolve(errorHandle)
       .then((h) => h && h.remove && h.remove())
@@ -123,6 +139,7 @@ export async function bootNativeGuest(game, bytes, { onStarted, onError, pad, wi
       // the error listener reports a dead session
     }
     unwatch = watchOverlays(plugin, doc, win);
+    showMenu = hideMenuButton(doc);
     onStarted?.(plugin);
     return true;
   } catch (e) {
