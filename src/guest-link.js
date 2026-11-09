@@ -13,14 +13,16 @@ import { guestBackend, pairingProblem, describePeer, BACKEND_NATIVE } from "../n
 import { startupTimeout } from "../native/agents/fable/js/startup-timeout.js";
 import { nt } from "../native/agents/fable/js/strings.js";
 import { once, latch } from "../native/agents/fable/js/guards.js";
+import { startGuestGame } from "../native/agents/fable/js/native-guest.js";
 
 const $ = (s) => document.querySelector(s);
 
 // boot(game, rom, onStart) starts EmulatorJS; onStart gets it once the game runs.
-// hooks.bootNative(game, bytes, { onStarted, onError }) starts the native player instead (N0-f:
-// deleteGame("nostaljibox-link"), start with persistSRAM:false, lockstepHold(true) at `started`,
-// then onStarted(plugin); onError(code) when it cannot). Without that hook the guest is an EJS
-// peer, as today, and a native host refuses it before the connection is made.
+// hooks.bootNative(game, bytes, { onStarted, onError }) starts the native player instead (N0-f,
+// native-guest.js: deleteGame("nostaljibox-link"), start with persistSRAM:false, lockstepHold(true)
+// once it runs, then onStarted(plugin); onError(code) when it cannot). hooks.stopNative() ends that
+// session when the link does. Without the hooks the guest is an EJS peer, as today, and a native
+// host refuses it before the connection is made.
 export function setupGuestLink(boot, hooks = {}) {
   const status = $("#join-status");
   let pc = null;
@@ -48,6 +50,7 @@ export function setupGuestLink(boot, hooks = {}) {
     if (startup) startup.clear();
     if (io) io.close();
     if (!native && window.EJS_emulator && window.EJS_emulator.pause) window.EJS_emulator.pause();
+    if (native && hooks.stopNative) hooks.stopNative(); // the game must not run on alone until the library loads
     leave(msg);
   });
 
@@ -80,17 +83,19 @@ export function setupGuestLink(boot, hooks = {}) {
             document.body.classList.add("linked");
             toast(t("youArePlayer2"));
           };
-          if (native) {
-            startup.expect("started");
-            Promise.resolve()
-              .then(() => hooks.bootNative(game, bytes, { onStarted: started, onError: (code) => abort(String(code), nt("guestBootFailed", { code })) }))
-              .catch((e) => abort(String(e?.code || e), nt("guestBootFailed", { code: e?.code || e })));
-          } else {
-            boot(game, new Blob([bytes]), (emu) => {
-              started(emu);
-              io.armHeartbeat(); // EJS guest: the game runs from here (the native one arms at lockstepStart)
-            });
-          }
+          if (native) startup.expect("started");
+          startGuestGame({
+            native,
+            game,
+            bytes,
+            boot,
+            bootNative: hooks.bootNative,
+            onStarted: started,
+            // Native could not open or keep the game: no EmulatorJS here (the host would not pair
+            // with it), tell the host and go back to the library.
+            onError: (code) => abort(code, nt("guestBootFailed", { code })),
+            onEjsStarted: () => io.armHeartbeat(), // EJS guest: the game runs from here (the native one arms at lockstepStart)
+          });
         } else if (msg.t === "abort") {
           end(nt("connectionLost"));
         } else if (sync) {
@@ -197,5 +202,6 @@ export function setupGuestLink(boot, hooks = {}) {
     stopCamera(camera);
     if (io) io.close();
     if (pc) pc.close();
+    if (native && hooks.stopNative) hooks.stopNative();
   });
 }

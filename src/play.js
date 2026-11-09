@@ -6,6 +6,7 @@ import { setupGuestLink } from "./guest-link.js";
 import { t, ejsLanguage, translatePage } from "../shared/i18n.js";
 import "./play.css";
 import { installNativeMode, autoOpenHostLink } from "../native/agents/sonnet-5-5/js/native-mode.js";
+import { bootNativeGuest, stopNativeGuest } from "../native/agents/fable/js/native-guest.js";
 import "../native/agents/sonnet-5-5/native.css";
 import "../native/agents/gemini-argon/js/native-menu.js";
 import "../native/agents/gemini-argon/js/native-menu.css";
@@ -239,8 +240,16 @@ if (params.has("join") && reloaded) {
   // then, so go back to the library instead of reopening the camera to join again.
   location.replace("../index.html");
 } else if (params.has("join")) {
-  // Second phone: the game comes from the host phone over the link.
-  setupGuestLink((game, rom, onStart) => boot(game, rom, onStart, "nostaljibox-link"));
+  // Second phone: the game comes from the host phone over the link. On iPhone it opens in the
+  // native player when the host's does (guest-link decides from the invite, NETPLAY.md §1.1).
+  setupGuestLink((game, rom, onStart) => boot(game, rom, onStart, "nostaljibox-link"), {
+    bootNative: (game, bytes, callbacks) => {
+      document.title = `${game.name} · NostaljiBox`;
+      lockOrientation(game.core);
+      return bootNativeGuest(game, bytes, { ...callbacks, pad: PADS[game.core] });
+    },
+    stopNative: stopNativeGuest,
+  });
 } else {
   setupHostLink(() => current);
   (async () => {
