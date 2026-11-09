@@ -13,14 +13,10 @@
   "scalingFit": "Sığdır",
   "scalingInteger": "Tam kat",
   "scalingStretch": "Doldur",
-  "fit": "Sığdır",
-  "integer": "Tam kat",
-  "stretch": "Doldur",
   "touchPad": "Dokunmatik tuşlar",
   "stats": "İstatistikler",
   "on": "Açık",
   "off": "Kapalı",
   "useClassicPlayer": "Klasik oynatıcıya geç",
-  "fallback": "Klasik oynatıcıya geç",
   "quit": "Kütüphaneye dön"
 }

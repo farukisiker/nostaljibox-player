@@ -13,14 +13,10 @@
   "scalingFit": "Fit",
   "scalingInteger": "Integer",
   "scalingStretch": "Stretch",
-  "fit": "Fit",
-  "integer": "Integer",
-  "stretch": "Stretch",
   "touchPad": "Touch controls",
   "stats": "Performance stats",
   "on": "On",
   "off": "Off",
   "useClassicPlayer": "Use the classic player",
-  "fallback": "Use the classic player",
   "quit": "Back to library"
 }

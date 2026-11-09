@@ -13,14 +13,10 @@
   "scalingFit": "Einpassen",
   "scalingInteger": "Ganzzahlig",
   "scalingStretch": "Strecken",
-  "fit": "Einpassen",
-  "integer": "Ganzzahlig",
-  "stretch": "Strecken",
   "touchPad": "Touch-Steuerung",
   "stats": "Leistungsstatistiken",
   "on": "Ein",
   "off": "Aus",
   "useClassicPlayer": "Klassischen Player verwenden",
-  "fallback": "Klassischen Player verwenden",
   "quit": "Zurück zur Bibliothek"
 }

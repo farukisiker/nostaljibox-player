@@ -13,14 +13,10 @@
   "scalingFit": "Ajustar",
   "scalingInteger": "Inteiro",
   "scalingStretch": "Esticar",
-  "fit": "Ajustar",
-  "integer": "Inteiro",
-  "stretch": "Esticar",
   "touchPad": "Controles de toque",
   "stats": "Estatísticas de desempenho",
   "on": "Ligado",
   "off": "Desligado",
   "useClassicPlayer": "Usar o reprodutor clássico",
-  "fallback": "Usar o reprodutor clássico",
   "quit": "Voltar à biblioteca"
 }

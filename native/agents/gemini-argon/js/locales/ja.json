@@ -13,14 +13,10 @@
   "scalingFit": "フィット",
   "scalingInteger": "整数倍",
   "scalingStretch": "ストレッチ",
-  "fit": "フィット",
-  "integer": "整数倍",
-  "stretch": "ストレッチ",
   "touchPad": "タッチコントロール",
   "stats": "パフォーマンス統計",
   "on": "オン",
   "off": "オフ",
   "useClassicPlayer": "クラシックプレーヤーを使用",
-  "fallback": "クラシックプレーヤーを使用",
   "quit": "ライブラリに戻る"
 }

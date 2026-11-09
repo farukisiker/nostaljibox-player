@@ -13,14 +13,10 @@
   "scalingFit": "适应",
   "scalingInteger": "整数倍",
   "scalingStretch": "拉伸",
-  "fit": "适应",
-  "integer": "整数倍",
-  "stretch": "拉伸",
   "touchPad": "触摸控制",
   "stats": "性能统计",
   "on": "开启",
   "off": "关闭",
   "useClassicPlayer": "使用经典播放器",
-  "fallback": "使用经典播放器",
   "quit": "返回游戏库"
 }

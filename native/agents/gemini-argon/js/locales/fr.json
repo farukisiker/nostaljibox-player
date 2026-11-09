@@ -13,14 +13,10 @@
   "scalingFit": "Ajuster",
   "scalingInteger": "Entier",
   "scalingStretch": "Étirer",
-  "fit": "Ajuster",
-  "integer": "Entier",
-  "stretch": "Étirer",
   "touchPad": "Commandes tactiles",
   "stats": "Stats de performances",
   "on": "Activé",
   "off": "Désactivé",
   "useClassicPlayer": "Utiliser le lecteur classique",
-  "fallback": "Utiliser le lecteur classique",
   "quit": "Retour à la bibliothèque"
 }

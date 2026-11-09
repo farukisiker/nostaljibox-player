@@ -13,14 +13,10 @@
   "scalingFit": "फ़िट",
   "scalingInteger": "पूर्णांक",
   "scalingStretch": "खिंचाव",
-  "fit": "फ़िट",
-  "integer": "पूर्णांक",
-  "stretch": "खिंचाव",
   "touchPad": "टच नियंत्रण",
   "stats": "प्रदर्शन आंकड़े",
   "on": "चालू",
   "off": "बंद",
   "useClassicPlayer": "क्लासिक प्लेयर का उपयोग करें",
-  "fallback": "क्लासिक प्लेयर का उपयोग करें",
   "quit": "लाइब्रेरी पर वापस जाएँ"
 }

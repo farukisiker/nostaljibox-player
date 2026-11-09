@@ -13,14 +13,10 @@
   "scalingFit": "Paskan",
   "scalingInteger": "Integer",
   "scalingStretch": "Regangkan",
-  "fit": "Paskan",
-  "integer": "Integer",
-  "stretch": "Regangkan",
   "touchPad": "Kontrol sentuh",
   "stats": "Statistik performa",
   "on": "Aktif",
   "off": "Nonaktif",
   "useClassicPlayer": "Gunakan pemutar klasik",
-  "fallback": "Gunakan pemutar klasik",
   "quit": "Kembali ke pustaka"
 }

@@ -61,44 +61,10 @@ export function t(key, vars) {
 
 let menuEl = null;
 let padVisible = true;
-let statsVisible = false;
+let statsVisible = true;
 let currentScaling = "fit";
-let externalUserPaused = false;
-let pausedBeforeOpen = false;
 let fallbackTriggered = false;
-let listeningPlugin = null;
-let stateListenerHandle = null;
 let boundDoc = null;
-
-function getPlugin() {
-  const nbNative = globalThis.window?.nbNative;
-  const p = nbNative?.plugin ?? globalThis.window?.Capacitor?.Plugins?.NativePlayer ?? null;
-  if (p) {
-    ensureStateListener(p);
-  }
-  return p;
-}
-
-function ensureStateListener(plugin) {
-  if (!plugin || plugin === listeningPlugin || typeof plugin.addListener !== "function") {
-    return;
-  }
-  listeningPlugin = plugin;
-  try {
-    const res = plugin.addListener("state", ({ state, reasons }) => {
-      if (!isMenuOpen()) {
-        if (state === "paused" && Array.isArray(reasons) && reasons.includes("user")) {
-          externalUserPaused = true;
-        } else if (state === "running" || (Array.isArray(reasons) && !reasons.includes("user"))) {
-          externalUserPaused = false;
-        }
-      }
-    });
-    Promise.resolve(res).then((handle) => {
-      stateListenerHandle = handle;
-    }).catch(() => {});
-  } catch {}
-}
 
 function isMenuOpen() {
   if (!menuEl) return false;
@@ -125,14 +91,14 @@ async function handleAction(action, btn) {
 
   switch (action) {
     case "resume": {
-      closeNativeMenu({ forceResume: true });
+      closeNativeMenu();
       break;
     }
     case "reset": {
       try {
         await plugin?.reset?.();
       } catch {}
-      closeNativeMenu({ forceResume: true });
+      closeNativeMenu();
       break;
     }
     case "save-state": {
@@ -217,43 +183,59 @@ async function handleAction(action, btn) {
     }
     case "scaling": {
       const mode = btn.getAttribute?.("data-mode") || btn.dataset?.mode;
-      currentScaling = mode;
       try {
-        await plugin?.setScaling?.({ mode });
+        if (typeof plugin?.setScaling === "function") {
+          await plugin.setScaling({ mode });
+        }
+        currentScaling = mode;
+        if (nbNative?.options) {
+          nbNative.options.scaling = mode;
+        }
+        const scaleBtns = menuEl?.querySelectorAll?.("[data-action='scaling']") || [];
+        for (const b of scaleBtns) {
+          const bMode = b.getAttribute?.("data-mode") || b.dataset?.mode;
+          const isActive = bMode === mode;
+          b.classList?.toggle?.("active", isActive);
+          b.setAttribute?.("aria-pressed", isActive ? "true" : "false");
+        }
       } catch {}
-      const scaleBtns = menuEl?.querySelectorAll?.("[data-action='scaling']") || [];
-      for (const b of scaleBtns) {
-        const bMode = b.getAttribute?.("data-mode") || b.dataset?.mode;
-        const isActive = bMode === mode;
-        b.classList?.toggle("active", isActive);
-        b.setAttribute?.("aria-pressed", isActive ? "true" : "false");
-      }
       break;
     }
     case "toggle-pad": {
-      padVisible = !padVisible;
-      btn.textContent = `${t("touchPad")}: ${padVisible ? t("on") : t("off")}`;
+      if (typeof nbNative?.setPadPreference !== "function") {
+        return;
+      }
+      const next = !padVisible;
       try {
-        await plugin?.setPadVisible?.({ visible: padVisible });
+        await nbNative.setPadPreference(next);
+        padVisible = next;
+        if (nbNative?.options) {
+          nbNative.options.showPad = next;
+        }
+        btn.textContent = `${t("touchPad")}: ${padVisible ? t("on") : t("off")}`;
       } catch {}
       break;
     }
     case "toggle-stats": {
-      statsVisible = !statsVisible;
-      btn.textContent = `${t("stats")}: ${statsVisible ? t("on") : t("off")}`;
+      const next = !statsVisible;
       try {
-        await plugin?.setStatsVisible?.({ visible: statsVisible });
+        if (typeof plugin?.setStatsVisible === "function") {
+          await plugin.setStatsVisible({ visible: next });
+        }
+        statsVisible = next;
+        if (nbNative?.options) {
+          nbNative.options.showStats = next;
+        }
+        btn.textContent = `${t("stats")}: ${statsVisible ? t("on") : t("off")}`;
       } catch {}
       break;
     }
     case "fallback": {
       closeNativeMenu({ skipResume: true });
-      if (!fallbackTriggered) {
-        fallbackTriggered = true;
-        try {
-          nbNative?.onFallback?.();
-        } catch {}
-      }
+      if (fallbackTriggered) return;
+      fallbackTriggered = true;
+      await Promise.resolve(plugin?.stop?.()).catch(() => {});
+      nbNative?.onFallback?.();
       break;
     }
     case "quit": {
@@ -327,6 +309,7 @@ function buildMenuContent(root) {
   // Save states
   const saveLabel = doc.createElement("div");
   saveLabel.className = "native-menu-label";
+  saveLabel.setAttribute("data-label", "save");
   saveLabel.textContent = t("saveState");
   panel.appendChild(saveLabel);
 
@@ -349,6 +332,7 @@ function buildMenuContent(root) {
   // Load states
   const loadLabel = doc.createElement("div");
   loadLabel.className = "native-menu-label";
+  loadLabel.setAttribute("data-label", "load");
   loadLabel.textContent = t("loadState");
   panel.appendChild(loadLabel);
 
@@ -371,6 +355,7 @@ function buildMenuContent(root) {
   // Scaling
   const scaleLabel = doc.createElement("div");
   scaleLabel.className = "native-menu-label";
+  scaleLabel.setAttribute("data-label", "scaling");
   scaleLabel.textContent = t("scaling");
   panel.appendChild(scaleLabel);
 
@@ -399,6 +384,11 @@ function buildMenuContent(root) {
   btnPad.type = "button";
   btnPad.setAttribute("data-action", "toggle-pad");
   btnPad.textContent = `${t("touchPad")}: ${padVisible ? t("on") : t("off")}`;
+  const nbNative = globalThis.window?.nbNative;
+  if (typeof nbNative?.setPadPreference !== "function") {
+    btnPad.disabled = true;
+    btnPad.setAttribute?.("disabled", "");
+  }
   btnPad.addEventListener?.("click", (e) => {
     e.stopPropagation?.();
     handleAction("toggle-pad", btnPad);
@@ -443,7 +433,7 @@ function buildMenuContent(root) {
   root._built = true;
 }
 
-function refreshMenuLabels() {
+export function refreshMenuLabels() {
   if (!menuEl) return;
   const title = menuEl.querySelector?.(".native-menu-title");
   if (title) title.textContent = t("menuTitle");
@@ -454,7 +444,7 @@ function refreshMenuLabels() {
   const btnReset = menuEl.querySelector?.('[data-action="reset"]');
   if (btnReset) btnReset.textContent = t("reset");
 
-  const saveLabel = menuEl.querySelector?.(".native-menu-label:nth-of-type(1)");
+  const saveLabel = menuEl.querySelector?.('[data-label="save"]');
   if (saveLabel) saveLabel.textContent = t("saveState");
 
   for (let slot = 1; slot <= 3; slot++) {
@@ -464,23 +454,40 @@ function refreshMenuLabels() {
     if (lBtn) lBtn.textContent = t("slot", { n: slot });
   }
 
-  const loadLabel = menuEl.querySelector?.(".native-menu-label:nth-of-type(2)");
+  const loadLabel = menuEl.querySelector?.('[data-label="load"]');
   if (loadLabel) loadLabel.textContent = t("loadState");
 
-  const scaleLabel = menuEl.querySelector?.(".native-menu-label:nth-of-type(3)");
+  const scaleLabel = menuEl.querySelector?.('[data-label="scaling"]');
   if (scaleLabel) scaleLabel.textContent = t("scaling");
 
   for (const mode of ["fit", "integer", "stretch"]) {
     const modeKey = mode === "fit" ? "scalingFit" : mode === "integer" ? "scalingInteger" : "scalingStretch";
     const scBtn = menuEl.querySelector?.(`[data-action="scaling"][data-mode="${mode}"]`);
-    if (scBtn) scBtn.textContent = t(modeKey);
+    if (scBtn) {
+      scBtn.textContent = t(modeKey);
+      const isActive = mode === currentScaling;
+      scBtn.classList?.toggle?.("active", isActive);
+      scBtn.setAttribute?.("aria-pressed", isActive ? "true" : "false");
+    }
   }
 
   const btnPad = menuEl.querySelector?.('[data-action="toggle-pad"]');
-  if (btnPad) btnPad.textContent = `${t("touchPad")}: ${padVisible ? t("on") : t("off")}`;
+  if (btnPad) {
+    btnPad.textContent = `${t("touchPad")}: ${padVisible ? t("on") : t("off")}`;
+    const nbNative = globalThis.window?.nbNative;
+    if (typeof nbNative?.setPadPreference !== "function") {
+      btnPad.disabled = true;
+      btnPad.setAttribute?.("disabled", "");
+    } else {
+      btnPad.disabled = false;
+      btnPad.removeAttribute?.("disabled");
+    }
+  }
 
   const btnStats = menuEl.querySelector?.('[data-action="toggle-stats"]');
-  if (btnStats) btnStats.textContent = `${t("stats")}: ${statsVisible ? t("on") : t("off")}`;
+  if (btnStats) {
+    btnStats.textContent = `${t("stats")}: ${statsVisible ? t("on") : t("off")}`;
+  }
 
   const btnFallback = menuEl.querySelector?.('[data-action="fallback"]');
   if (btnFallback) btnFallback.textContent = t("useClassicPlayer");
@@ -517,7 +524,11 @@ export function openNativeMenu() {
   const plugin = nbNative?.plugin ?? globalThis.window?.Capacitor?.Plugins?.NativePlayer;
   if (!plugin && !nbNative) return false;
 
-  ensureStateListener(plugin);
+  currentScaling = nbNative?.options?.scaling ?? "fit";
+  padVisible = nbNative?.options?.showPad ?? true;
+  statsVisible = nbNative?.options?.showStats ?? true;
+
+  globalThis.document?.getElementById?.("tools-panel")?.classList?.add?.("hidden");
 
   const el = getOrCreateMenuEl();
   if (!el) return false;
@@ -527,8 +538,6 @@ export function openNativeMenu() {
   el.hidden = false;
   el.classList?.remove("hidden");
 
-  pausedBeforeOpen = Boolean(externalUserPaused || nbNative?.userPaused || plugin?.userPaused);
-
   try {
     Promise.resolve(plugin?.pause?.()).catch(() => {});
   } catch {}
@@ -536,7 +545,7 @@ export function openNativeMenu() {
   return true;
 }
 
-export function closeNativeMenu({ forceResume = false, skipResume = false } = {}) {
+export function closeNativeMenu({ skipResume = false } = {}) {
   const el = getOrCreateMenuEl();
   if (el) {
     el.hidden = true;
@@ -546,12 +555,10 @@ export function closeNativeMenu({ forceResume = false, skipResume = false } = {}
   const nbNative = globalThis.window?.nbNative;
   const plugin = nbNative?.plugin ?? globalThis.window?.Capacitor?.Plugins?.NativePlayer;
 
-  if (!skipResume && (forceResume || !pausedBeforeOpen)) {
+  if (!skipResume) {
     try {
       Promise.resolve(plugin?.resume?.()).catch(() => {});
     } catch {}
-    pausedBeforeOpen = false;
-    externalUserPaused = false;
   }
 }
 
@@ -560,8 +567,7 @@ function handleMenuEvent() {
   const plugin = nbNative?.plugin ?? globalThis.window?.Capacitor?.Plugins?.NativePlayer;
   if (!plugin && !nbNative) return;
 
-  const el = getOrCreateMenuEl();
-  if (el && !el.hidden && !el.classList?.contains("hidden")) {
+  if (isMenuOpen()) {
     closeNativeMenu();
   } else {
     openNativeMenu();
@@ -576,8 +582,6 @@ export function installNativeMenu() {
       boundDoc = doc;
     }
   }
-  const p = getPlugin();
-  if (p) ensureStateListener(p);
 }
 
 export function resetNativeMenu() {
@@ -599,18 +603,9 @@ export function resetNativeMenu() {
   }
   menuEl = null;
   padVisible = true;
-  statsVisible = false;
+  statsVisible = true;
   currentScaling = "fit";
-  externalUserPaused = false;
-  pausedBeforeOpen = false;
   fallbackTriggered = false;
-  listeningPlugin = null;
-  if (stateListenerHandle?.remove) {
-    try {
-      stateListenerHandle.remove();
-    } catch {}
-    stateListenerHandle = null;
-  }
 }
 
 // Automatically install listener on module load

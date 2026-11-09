@@ -13,14 +13,10 @@
   "scalingFit": "맞춤",
   "scalingInteger": "정수 배율",
   "scalingStretch": "늘리기",
-  "fit": "맞춤",
-  "integer": "정수 배율",
-  "stretch": "늘리기",
   "touchPad": "터치 컨트롤",
   "stats": "성능 통계",
   "on": "켜짐",
   "off": "꺼짐",
   "useClassicPlayer": "클래식 플레이어 사용",
-  "fallback": "클래식 플레이어 사용",
   "quit": "라이브러리로 돌아가기"
 }
