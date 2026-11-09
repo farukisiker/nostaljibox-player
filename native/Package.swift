@@ -28,10 +28,27 @@ let release = (try? Data(contentsOf: URL(fileURLWithPath: releasePath)))
     .flatMap { try? JSONDecoder().decode(Release.self, from: $0) }
 let cores = (release?.cores ?? [:]).sorted { $0.key < $1.key }
 
+/// Root source files of a module that a sub-agent has replaced: when <module>/<model>/<name> exists
+/// for a file <module>/<name>, the lead's root copy is excluded (one definition per symbol/file name;
+/// the lead's original stays in the repo for provenance).
+func replacedRootFiles(in module: String) -> [String] {
+    let fm = FileManager.default
+    let entries = ((try? fm.contentsOfDirectory(atPath: root + "/" + module)) ?? []).sorted()
+    let subfolders = entries.filter { name in
+        var dir: ObjCBool = false
+        return name.hasPrefix("gpt-") || name.hasPrefix("gemini-") || name.hasPrefix("claude-") || name.hasPrefix("fable")
+            ? (fm.fileExists(atPath: root + "/" + module + "/" + name, isDirectory: &dir) && dir.boolValue) : false
+    }
+    let sources = entries.filter { $0.hasSuffix(".c") || $0.hasSuffix(".swift") }
+    return sources.filter { file in subfolders.contains { exists("\(module)/\($0)/\(file)") } }
+}
+
 var targets: [Target] = [
     // codex-astra: C bridge to the libretro API, core loader, emulation session, video, audio.
-    .target(name: "LibretroC", path: "agents/codex-astra/LibretroC", publicHeadersPath: "include"),
+    .target(name: "LibretroC", path: "agents/codex-astra/LibretroC",
+            exclude: replacedRootFiles(in: "agents/codex-astra/LibretroC"), publicHeadersPath: "include"),
     .target(name: "LibretroHost", dependencies: ["LibretroC"], path: "agents/codex-astra/LibretroHost",
+            exclude: replacedRootFiles(in: "agents/codex-astra/LibretroHost"),
             resources: metalFiles(in: "agents/codex-astra/LibretroHost").map { .process($0) }),
 ]
 var pluginDeps: [Target.Dependency] = [
