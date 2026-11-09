@@ -107,7 +107,8 @@ test("useNative: false on other platforms, with the flag off or on the EmulatorJ
     globalThis.window = { Capacitor: { getPlatform: () => "ios", Plugins: { NativePlayer: { isAvailable: async () => availability } } } };
     assert.equal(await useNative(game, new URLSearchParams(), rom), true);
     assert.equal(await useNative(game, new URLSearchParams("ejs=1"), rom), false);
-    assert.equal(await useNative(game, new URLSearchParams("join"), rom), false);
+    // N0-f: ?join no longer forces EmulatorJS (the guest's own gate is guestBackend in peer-block.js).
+    assert.equal(await useNative(game, new URLSearchParams("join"), rom), true);
 
     globalThis.localStorage = { getItem: (key) => (key === "nb_native" ? "off" : null) };
     assert.equal(await useNative(game, new URLSearchParams(), rom), false);

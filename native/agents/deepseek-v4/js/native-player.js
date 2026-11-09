@@ -130,7 +130,9 @@ export async function useNative(game, params, rom) {
     const plugin = nativePlugin();
     if (!plugin) return false;
     if (flag() === "off") return false;
-    if (params?.has?.("ejs") || params?.has?.("join")) return false;
+    // `?join` is no gate any more (N0-f, NETPLAY.md §5): the guest decides from the host's invite
+    // in guestBackend (native/agents/fable/js/peer-block.js) with these same checks.
+    if (params?.has?.("ejs")) return false;
     const bytes = await toBytes(rom);
     const container = containerOf(bytes, game.file || game.name);
     if (container !== "raw" && !NATIVE_CONTAINERS[container]) return false;
