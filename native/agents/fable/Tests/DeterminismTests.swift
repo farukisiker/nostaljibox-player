@@ -5,7 +5,9 @@
 // sequential fresh load after a full teardown. Cores: NB_CORES_DIR/<core>.framework/<core>;
 // fixtures: NB_FIXTURES_DIR/snes-input/input-test.sfc (fable) and NB_FIXTURES_DIR/{md,segaMD}/pong.md
 // (gemini-argon). Checkpoints hash what EmulatorSession.checksum hashes: RETRO_MEMORY_SYSTEM_RAM when the
-// core exposes it, else the serialized state; SNES pad words come from the WRAM variable inside that state.
+// core exposes it, else the serialized state. Supafaust (lock 642d1d1) exposes no system RAM and its
+// state ("MDFNRINP") carries no variable names, so the SNES pad words are read from the ROM's SRAM mirror
+// (RETRO_MEMORY_SAVE_RAM: hash1, hash2, frame, held1, held2), which the core does expose.
 // Log lines start with "** [DET]" so native-ci's log grep keeps them.
 import Foundation
 import XCTest
@@ -48,13 +50,14 @@ private struct DeterminismError: Error, CustomStringConvertible {
     init(_ text: String) { description = text }
 }
 
-/// The input-test ROM's WRAM words (bank $7E, little-endian), see fixtures/snes-input/README.md.
+/// The input-test ROM's pad words as mirrored into SRAM every frame (fixtures/snes-input/README.md):
+/// $700000 hash1 (= WRAM $7E0006, pad 1 history), $700002 hash2 (= $7E0008, pad 2 history),
+/// $700004 frame, $700006 held1, $700008 held2. Little-endian.
 private struct PadWords: CustomStringConvertible {
-    let frame, sum1, sum2, hash1, hash2, last1, last2, held1, held2: UInt16
+    let hash1, hash2, frame, held1, held2: UInt16
     var description: String {
-        String(format: "frame=%u sum1=$%04X sum2=$%04X hash1=$%04X hash2=$%04X last1=$%04X last2=$%04X held1=%u held2=%u",
-               UInt32(frame), UInt32(sum1), UInt32(sum2), UInt32(hash1), UInt32(hash2),
-               UInt32(last1), UInt32(last2), UInt32(held1), UInt32(held2))
+        String(format: "frame=%u hash1=$%04X hash2=$%04X held1=%u held2=%u",
+               UInt32(frame), UInt32(hash1), UInt32(hash2), UInt32(held1), UInt32(held2))
     }
 }
 
@@ -112,37 +115,14 @@ private final class Phone {
     }
     func saveRAMBytes() -> [UInt8] { core.saveRAM().map { [UInt8]($0) } ?? [] }
 
-    /// The first 0x20000 bytes of WRAM ($7E0000..): from RETRO_MEMORY_SYSTEM_RAM when the core exposes
-    /// it, otherwise out of the savestate. Supafaust (iOS build, lock 642d1d1) reports size 0 for system
-    /// RAM, but its Mednafen state is written with variable names, and `WRAM` is the 128 KiB array in
-    /// it: `u8 nameLength, "WRAM", u32 LE size, data` (Mednafen state.cpp WriteStateChunk).
-    func wram() throws -> [UInt8] {
-        if let ram = systemRAM { return [UInt8](ram) }
-        guard let state = core.serialize() else { throw DeterminismError("system RAM not exposed and serialize() failed") }
-        let bytes = [UInt8](state)
-        let tag: [UInt8] = [4, 0x57, 0x52, 0x41, 0x4D] // "\u{4}WRAM"
-        var sizesSeen: [UInt32] = []
-        var index = 0
-        while index + tag.count + 4 <= bytes.count {
-            if bytes[index] == 4, Array(bytes[index..<index + tag.count]) == tag {
-                let size = UInt32(bytes[index + 5]) | UInt32(bytes[index + 6]) << 8
-                    | UInt32(bytes[index + 7]) << 16 | UInt32(bytes[index + 8]) << 24
-                let start = index + 9
-                if size == 0x20000, start + Int(size) <= bytes.count { return Array(bytes[start..<start + Int(size)]) }
-                sizesSeen.append(size)
-            }
-            index += 1
-        }
-        let head = bytes.prefix(8).map { String(format: "%02X", UInt32($0)) }.joined()
-        let magic = String(decoding: bytes.prefix(8).map { (0x20...0x7E).contains($0) ? $0 : 0x2E }, as: UTF8.self)
-        throw DeterminismError("system RAM not exposed (size \(systemRAMSize)) and no 128 KiB WRAM variable in the \(bytes.count)-byte state (head \(head) \"\(magic)\", WRAM sizes seen \(sizesSeen))")
-    }
+    /// The input-test ROM's pad words from its SRAM mirror (the core exposes RETRO_MEMORY_SAVE_RAM, 2 KiB).
     func padWords() throws -> PadWords {
-        let ram = try wram()
-        guard ram.count >= 0x12 else { throw DeterminismError("WRAM too small: \(ram.count) bytes") }
-        func word(_ offset: Int) -> UInt16 { UInt16(ram[offset]) | (UInt16(ram[offset + 1]) << 8) }
-        return PadWords(frame: word(0x00), sum1: word(0x02), sum2: word(0x04), hash1: word(0x06), hash2: word(0x08),
-                        last1: word(0x0A), last2: word(0x0C), held1: word(0x0E), held2: word(0x10))
+        let sram = saveRAMBytes()
+        guard sram.count >= 10 else {
+            throw DeterminismError("cartridge RAM not exposed (\(sram.count) bytes; input-test.sfc declares 2 KiB)")
+        }
+        func word(_ offset: Int) -> UInt16 { UInt16(sram[offset]) | (UInt16(sram[offset + 1]) << 8) }
+        return PadWords(hash1: word(0x00), hash2: word(0x02), frame: word(0x04), held1: word(0x06), held2: word(0x08))
     }
     /// The pad words when the loaded ROM is the SNES input-test ROM, nil for other systems.
     func padWords(ifSNES wanted: Bool) throws -> PadWords? {
@@ -245,31 +225,31 @@ final class FableDeterminismTests: XCTestCase {
         // The ROM counts NMIs: one per emulated frame.
         XCTAssertGreaterThan(idle.0.frame, 500, "idle run: too few NMIs for \(scriptFrames) frames (\(idle.0))")
         XCTAssertLessThanOrEqual(idle.0.frame, UInt16(scriptFrames + 2), "idle run: too many NMIs (\(idle.0))")
-        XCTAssertEqual(idle.0.sum1, 0, "idle run must see no pad-1 input (\(idle.0))")
-        XCTAssertEqual(idle.0.sum2, 0, "idle run must see no pad-2 input (\(idle.0))")
+        XCTAssertEqual(idle.0.hash1, 0, "idle run must see no pad-1 input (\(idle.0))")
+        XCTAssertEqual(idle.0.hash2, 0, "idle run must see no pad-2 input (\(idle.0))")
+        XCTAssertEqual(idle.0.held1 + idle.0.held2, 0, "idle run must see no held buttons (\(idle.0))")
 
         // Port 0 only: pad-1 words move, pad-2 words stay zero.
         XCTAssertNotEqual(hostOnly.0.hash1, 0, "port 0 script did not reach pad 1 (\(hostOnly.0))")
         XCTAssertGreaterThan(hostOnly.0.held1, 0, "port 0 script did not reach pad 1 (\(hostOnly.0))")
-        XCTAssertEqual(hostOnly.0.sum2, 0, "port 0 input leaked into pad 2 $7E0004 (\(hostOnly.0))")
-        XCTAssertEqual(hostOnly.0.hash2, 0, "port 0 input leaked into pad 2 $7E0008 (\(hostOnly.0))")
+        XCTAssertEqual(hostOnly.0.hash2, 0, "port 0 input leaked into pad 2 (hash2 = WRAM $7E0008) (\(hostOnly.0))")
+        XCTAssertEqual(hostOnly.0.held2, 0, "port 0 input leaked into pad 2 (held2) (\(hostOnly.0))")
 
-        // Port 1 only: pad-2 words move ($7E0004/$7E0008), pad-1 words stay zero. This is the proof
-        // that the bridge's second mask reaches the core as controller 2.
-        XCTAssertNotEqual(guestOnly.0.hash2, 0, "port 1 script did not reach pad 2 $7E0008 (\(guestOnly.0))")
-        XCTAssertNotEqual(guestOnly.0.sum2, 0, "port 1 script did not reach pad 2 $7E0004 (\(guestOnly.0))")
+        // Port 1 only: pad-2 words move (hash2 mirrors WRAM $7E0008), pad-1 words stay zero. This is the
+        // proof that the bridge's second mask reaches the core as controller 2.
+        XCTAssertNotEqual(guestOnly.0.hash2, 0, "port 1 script did not reach pad 2 (hash2 = WRAM $7E0008) (\(guestOnly.0))")
         XCTAssertGreaterThan(guestOnly.0.held2, 0, "port 1 script did not reach pad 2 (\(guestOnly.0))")
-        XCTAssertEqual(guestOnly.0.sum1, 0, "port 1 input leaked into pad 1 $7E0002 (\(guestOnly.0))")
-        XCTAssertEqual(guestOnly.0.hash1, 0, "port 1 input leaked into pad 1 $7E0006 (\(guestOnly.0))")
+        XCTAssertEqual(guestOnly.0.hash1, 0, "port 1 input leaked into pad 1 (hash1 = WRAM $7E0006) (\(guestOnly.0))")
+        XCTAssertEqual(guestOnly.0.held1, 0, "port 1 input leaked into pad 1 (held1) (\(guestOnly.0))")
 
         // Both pads are auto-read in the same VBlank, so the same script lands identically on either port.
         XCTAssertEqual(hostOnly.0.hash1, guestOnly.0.hash2,
                        "same script gives different pad hashes on port 0 vs port 1 (timing or mapping differs)")
-        XCTAssertEqual(hostOnly.0.sum1, guestOnly.0.sum2, "same script gives different pad sums on port 0 vs port 1")
+        XCTAssertEqual(hostOnly.0.held1, guestOnly.0.held2, "same script gives different held counts on port 0 vs port 1")
 
-        XCTAssertNotEqual(idle.1, hostOnly.1, "WRAM hash ignores port 0 input")
-        XCTAssertNotEqual(idle.1, guestOnly.1, "WRAM hash ignores port 1 input")
-        XCTAssertNotEqual(hostOnly.1, guestOnly.1, "WRAM hash cannot tell port 0 from port 1")
+        XCTAssertNotEqual(idle.1, hostOnly.1, "checksum ignores port 0 input")
+        XCTAssertNotEqual(idle.1, guestOnly.1, "checksum ignores port 1 input")
+        XCTAssertNotEqual(hostOnly.1, guestOnly.1, "checksum cannot tell port 0 from port 1")
     }
 
     // MARK: 2. replay from a state after teardown, different SRAM and different pre-roll
