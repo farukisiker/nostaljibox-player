@@ -266,3 +266,81 @@ test("autoOpenHostLink clicks #p2 once, only with p2=1", () => {
   assert.equal(autoOpenHostLink({ params: new URLSearchParams("?id=g1&ejs=1&p2=1") }), false);
   assert.equal(dom.els.get("p2").clicks, 1);
 });
+
+// ---- fallback ordering and ZIP inner names ----
+import { makeZip } from "./zip-fixture.mjs";
+
+test("nbNative.onFallback stops the native session before EmulatorJS boots, exactly once", async () => {
+  const log = [];
+  const { ctx } = setup();
+  ctx.bootEmulator = () => log.push("boot");
+  const stop = plugin.stop;
+  plugin.stop = async () => {
+    log.push("stop");
+    return stop();
+  };
+  assert.equal(await installNativeMode(ctx), true);
+  const menuFallback = dom.win.nbNative.onFallback; // what the native menu holds on to
+  const first = menuFallback();
+  assert.equal(dom.doc.documentElement.classList.contains("native"), false, "page leaves native mode at once");
+  assert.equal(dom.win.listeners.length, 0, "page listeners are removed at once");
+  assert.deepEqual(log, [], "EmulatorJS has not started yet");
+  await first;
+  assert.deepEqual(log, ["stop", "boot"], "the session is stopped before EmulatorJS boots");
+  await menuFallback(); // again: nothing happens
+  plugin.emit("error", { code: "internal", message: "late" }); // its listener is gone
+  await settle();
+  assert.deepEqual(log, ["stop", "boot"]);
+});
+
+test("a plugin error also stops native before booting EmulatorJS, once", async () => {
+  const log = [];
+  const { ctx } = setup();
+  ctx.bootEmulator = () => log.push("boot");
+  const stop = plugin.stop;
+  plugin.stop = async () => (log.push("stop"), stop());
+  await installNativeMode(ctx);
+  plugin.emit("error", { code: "core-load", message: "boom" });
+  await settle();
+  assert.equal(log.at(-1), "boot");
+  assert.equal(log.filter((entry) => entry === "boot").length, 1);
+  assert.ok(log.indexOf("stop") < log.indexOf("boot"));
+});
+
+test("a wedged plugin cannot keep EmulatorJS from starting", async () => {
+  const { ctx, fallbacks } = setup();
+  await installNativeMode(ctx);
+  plugin.stop = () => new Promise(() => {}); // never answers
+  const done = dom.win.nbNative.onFallback();
+  await done; // resolves after the stop timeout
+  assert.equal(fallbacks(), 1);
+});
+
+test("a ZIP with a .bin ROM passes the inner name as romName", async () => {
+  const { ctx } = setup();
+  const rom = makeZip([["roms/Sonic The Hedgehog.bin", new Uint8Array([1, 2, 3])]]);
+  Object.assign(ctx, { rom, game: { id: "g1", name: "Sonic", file: "Sonic.zip", core: "segaMD" } });
+  assert.equal(await installNativeMode(ctx), true);
+  assert.equal(plugin.calls.start.length, 1);
+  assert.equal(plugin.calls.start[0].romName, "Sonic The Hedgehog.bin");
+  assert.equal(plugin.calls.start[0].gameId, "g1");
+  assert.equal(dom.win.nbNative.game.file, "Sonic.zip", "the menu still sees the library record");
+});
+
+test("a ZIP without a ROM entry is declined before anything is touched", async () => {
+  const { ctx, fallbacks } = setup();
+  const rom = makeZip([["readme.txt", "hello"]]);
+  Object.assign(ctx, { rom, game: { id: "g1", name: "Sonic", file: "Sonic.zip", core: "segaMD" } });
+  assert.equal(await installNativeMode(ctx), false);
+  assert.equal(plugin.calls.start.length, 0);
+  assert.equal(dom.win.listeners.length, 0);
+  assert.equal(dom.doc.documentElement.classList.contains("native"), false);
+  assert.equal(dom.win.nbNative, undefined);
+  assert.equal(fallbacks(), 0, "play.js boots EmulatorJS itself on false");
+});
+
+test("a raw ROM keeps its own file name", async () => {
+  const { ctx } = setup();
+  assert.equal(await installNativeMode(ctx), true);
+  assert.equal(plugin.calls.start[0].romName, "test.sfc");
+});

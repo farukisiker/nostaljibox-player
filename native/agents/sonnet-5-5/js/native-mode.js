@@ -8,6 +8,7 @@
 // `ev.target`, so none of them depends on the order in which play.js binds its own handlers
 // (setupHostLink, the #back and #emu-menu listeners): a capturing ancestor always runs first.
 import { useNative, bootNative, stopNative } from "../../deepseek-v4/js/native-player.js";
+import { zipRomName } from "./zip-rom.js";
 
 const BACK_URL = "../index.html?from=game";
 // Panels and overlays that sit over the game; while any is visible the native pad is hidden.
@@ -62,12 +63,16 @@ export async function installNativeMode(ctx) {
   const { params, game, rom, PADS, bootEmulator } = ctx || {};
   if (active) return false;
   if (!(await useNative(game, params, rom))) return false;
+  // A ZIP must name its ROM for the native side. DeepSeek's bootNative finds the inner name only
+  // for extensions detectSystem knows, so a Mega Drive `.bin` would reach the plugin as "x.zip".
+  // Read the central directory here; no ROM-looking entry means EmulatorJS keeps the game.
+  const inner = await zipRomName(game, rom);
+  if (inner === null) return false;
 
   const doc = globalThis.document;
   const win = globalThis.window;
   const navigate = ctx.navigate || ((url) => (globalThis.location.href = url));
   active = true;
-  let fellBack = false;
   let padVisible = true;
   let observer = null;
   const offs = [];
@@ -138,15 +143,21 @@ export async function installNativeMode(ctx) {
   };
   cleanup = leaveNativeMode;
 
+  // Exactly once, from every path (a plugin error, a rejected start, the native menu calling
+  // `nbNative.onFallback()`): the page leaves native mode and the native session is stopped
+  // (which also drops its error listener) BEFORE EmulatorJS starts, so the two never run together.
+  let fallbackDone = null;
   const onFallback = () => {
-    if (fellBack) return;
-    fellBack = true;
+    if (fallbackDone) return fallbackDone;
     leaveNativeMode();
-    try {
-      bootEmulator?.();
-    } catch {
-      // EmulatorJS reports its own failures through the page's error box
-    }
+    fallbackDone = stopThenLeave(() => {
+      try {
+        bootEmulator?.();
+      } catch {
+        // EmulatorJS reports its own failures through the page's error box
+      }
+    });
+    return fallbackDone;
   };
 
   doc.title = `${game.name} · NostaljiBox`;
@@ -158,8 +169,11 @@ export async function installNativeMode(ctx) {
   // Extension point for the native menu (WP6): it listens for `nb:native-menu` and uses only these.
   win.nbNative = { plugin: plugin(), game, onFallback };
 
-  await bootNative(game, rom, { pad: PADS?.[game.core], onFallback });
-  if (!fellBack) syncPad(true); // a panel may have been opened while the session was starting
+  // bootNative takes `romName` from `game.file` for a ZIP it cannot resolve itself; hand it the inner name.
+  const bootGame = inner ? { ...game, file: inner } : game;
+  await bootNative(bootGame, rom, { pad: PADS?.[game.core], onFallback });
+  if (fallbackDone) await fallbackDone; // resolve after EmulatorJS has been started
+  else syncPad(true); // a panel may have been opened while the session was starting
   return true;
 }
 
