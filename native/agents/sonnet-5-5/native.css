@@ -9,3 +9,11 @@ html.native body {
 html.native #game {
   display: none !important;
 }
+/* Two-phone play (host-link.js sets body.linked): loading a state or resetting on one phone only
+   would desync the lockstep, so the native menu's load buttons, their label and Reset are hidden
+   meanwhile (N0-f review; the menu itself is gemini-argon's, attribute names from native-menu.js). */
+body.linked #native-menu [data-action='load-state'],
+body.linked #native-menu [data-label='load'],
+body.linked #native-menu [data-action='reset'] {
+  display: none !important;
+}
