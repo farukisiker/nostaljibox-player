@@ -310,10 +310,13 @@ test("a plugin error also stops native before booting EmulatorJS, once", async (
 test("a wedged plugin cannot keep EmulatorJS from starting", async () => {
   const { ctx, fallbacks } = setup();
   await installNativeMode(ctx);
-  plugin.stop = () => new Promise(() => {}); // never answers
+  let release;
+  plugin.stop = () => new Promise((resolve) => (release = resolve)); // answers only when released
   const done = dom.win.nbNative.onFallback();
   await done; // resolves after the stop timeout
   assert.equal(fallbacks(), 1);
+  release({ sramSaved: false }); // native-player.js shares one pending stop; let it end for later tests
+  await settle();
 });
 
 test("a ZIP with a .bin ROM passes the inner name as romName", async () => {
@@ -343,4 +346,114 @@ test("a raw ROM keeps its own file name", async () => {
   const { ctx } = setup();
   assert.equal(await installNativeMode(ctx), true);
   assert.equal(plugin.calls.start[0].romName, "test.sfc");
+});
+
+// ---- nbNative v2: options, pad preference, tools panel, late start ----
+
+test("nbNative carries the options bootNative started with", async () => {
+  const { ctx } = setup();
+  await installNativeMode(ctx);
+  assert.deepEqual(dom.win.nbNative.options, { scaling: "fit", showPad: true, showStats: true });
+  const start = plugin.calls.start[0];
+  assert.equal(start.scaling, dom.win.nbNative.options.scaling);
+  assert.equal(start.showPad, dom.win.nbNative.options.showPad);
+  assert.equal(start.showStats, dom.win.nbNative.options.showStats);
+  assert.equal(typeof dom.win.nbNative.setPadPreference, "function");
+});
+
+test("setPadPreference(false) hides the pad and overlays cannot bring it back", async () => {
+  const { ctx } = setup();
+  await installNativeMode(ctx);
+  plugin.calls.setPadVisible.length = 0;
+  await dom.win.nbNative.setPadPreference(false);
+  assert.deepEqual(plugin.calls.setPadVisible, [{ visible: false }]);
+  // open and close an overlay: the pad stays off because the player turned it off
+  dom.els.get("tools-panel").classList.remove("hidden");
+  dom.mutate();
+  dom.els.get("tools-panel").classList.add("hidden");
+  dom.mutate();
+  assert.equal(plugin.calls.setPadVisible.at(-1).visible, false);
+  assert.ok(plugin.calls.setPadVisible.every((call) => call.visible === false));
+});
+
+test("setPadPreference(true) shows the pad again, but not under an open overlay", async () => {
+  const { ctx } = setup();
+  await installNativeMode(ctx);
+  await dom.win.nbNative.setPadPreference(false);
+  plugin.calls.setPadVisible.length = 0;
+  dom.els.get("native-menu").classList.remove("hidden"); // the menu is open
+  await dom.win.nbNative.setPadPreference(true);
+  assert.deepEqual(plugin.calls.setPadVisible, [{ visible: false }], "preferred, but covered by the menu");
+  dom.els.get("native-menu").classList.add("hidden"); // menu closes
+  dom.mutate();
+  assert.deepEqual(plugin.calls.setPadVisible.at(-1), { visible: true });
+});
+
+test("a plugin that rejects setPadVisible makes setPadPreference reject and keeps the old preference", async () => {
+  const { ctx } = setup();
+  await installNativeMode(ctx);
+  const ok = plugin.setPadVisible;
+  plugin.setPadVisible = async () => {
+    throw { code: "internal", message: "no" };
+  };
+  await assert.rejects(() => dom.win.nbNative.setPadPreference(false));
+  plugin.setPadVisible = ok;
+  plugin.calls.setPadVisible.length = 0;
+  dom.els.get("error").classList.remove("hidden");
+  dom.mutate();
+  dom.els.get("error").classList.add("hidden");
+  dom.mutate();
+  assert.deepEqual(plugin.calls.setPadVisible.at(-1), { visible: true }, "still preferred visible");
+});
+
+test("#emu-menu closes #tools-panel before it dispatches nb:native-menu", async () => {
+  const { ctx } = setup();
+  await installNativeMode(ctx);
+  const panel = dom.els.get("tools-panel");
+  panel.classList.remove("hidden");
+  let hiddenAtDispatch = null;
+  const dispatch = dom.doc.dispatchEvent;
+  dom.doc.dispatchEvent = (ev) => {
+    hiddenAtDispatch = panel.classList.contains("hidden");
+    return dispatch(ev);
+  };
+  click("emu-menu");
+  dom.doc.dispatchEvent = dispatch;
+  assert.equal(hiddenAtDispatch, true);
+  assert.deepEqual(dom.doc.events, ["nb:native-menu"]);
+});
+
+test("onFallback while plugin.start is still running stops the late session too", async () => {
+  const log = [];
+  const { ctx } = setup();
+  ctx.bootEmulator = () => log.push("boot");
+  let finishStart;
+  plugin.start = () =>
+    new Promise((resolve) => {
+      log.push("start-called");
+      finishStart = () => (log.push("start-done"), resolve({}));
+    });
+  const stop = plugin.stop;
+  plugin.stop = async () => (log.push("stop"), stop());
+  const installing = installNativeMode(ctx);
+  await settle();
+  assert.deepEqual(log, ["start-called"]);
+  const fallback = dom.win.nbNative.onFallback(); // the menu, before the start finished
+  await settle();
+  assert.deepEqual(log, ["start-called", "stop"], "EmulatorJS waits for the start to end");
+  finishStart();
+  await fallback;
+  await installing;
+  assert.deepEqual(log, ["start-called", "stop", "start-done", "stop", "boot"]);
+});
+
+test("a start that already finished is not stopped twice by the menu's fallback", async () => {
+  const log = [];
+  const { ctx } = setup();
+  ctx.bootEmulator = () => log.push("boot");
+  const stop = plugin.stop;
+  plugin.stop = async () => (log.push("stop"), stop());
+  await installNativeMode(ctx);
+  await dom.win.nbNative.onFallback();
+  assert.deepEqual(log, ["stop", "boot"]);
 });

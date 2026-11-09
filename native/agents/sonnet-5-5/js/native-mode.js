@@ -19,14 +19,16 @@ let cleanup = null; // removes the listeners installed by the running native mod
 let hostLinkOpened = false; // autoOpenHostLink runs once per page load
 const STOP_WAIT_MS = 2500; // leaving the page must not hang on a plugin that never answers
 
-// stopNative never rejects, but a wedged plugin must not trap the user on the play page.
-function stopThenLeave(leave) {
+// A wedged plugin must not trap the user on the play page: wait for `promise`, but not for ever.
+function within(promise, ms = STOP_WAIT_MS) {
   let timer;
-  const wait = new Promise((resolve) => (timer = setTimeout(resolve, STOP_WAIT_MS)));
-  return Promise.race([stopNative(), wait]).then(() => {
-    clearTimeout(timer);
-    leave();
-  });
+  const wait = new Promise((resolve) => (timer = setTimeout(resolve, ms)));
+  return Promise.race([Promise.resolve(promise).catch(() => {}), wait]).then(() => clearTimeout(timer));
+}
+
+// stopNative never rejects, but it may never answer either.
+function stopThenLeave(leave) {
+  return within(stopNative()).then(leave);
 }
 
 function isShown(el) {
@@ -73,8 +75,12 @@ export async function installNativeMode(ctx) {
   const win = globalThis.window;
   const navigate = ctx.navigate || ((url) => (globalThis.location.href = url));
   active = true;
-  let padVisible = true;
+  let padVisible = true; // what the plugin was last told
+  let preferred = true; // the player's own choice (menu toggle); overlays can only hide on top of it
   let observer = null;
+  // What bootNative started the session with (deepseek-v4/js/native-player.js: scaling "fit",
+  // showPad true, showStats true). The menu keeps this object up to date.
+  const options = { scaling: "fit", showPad: true, showStats: true };
   const offs = [];
   const listen = (target, type, fn) => {
     target.addEventListener(type, fn, true);
@@ -96,6 +102,9 @@ export async function installNativeMode(ctx) {
       stopThenLeave(() => navigate(BACK_URL)); // the ad rule stays in the library
     } else if (closestId(target, "emu-menu")) {
       swallow(ev);
+      // play.js's closeTools never sees this click, so close the tools panel here, or it would
+      // keep counting as an overlay over the pad.
+      doc.getElementById("tools-panel")?.classList?.add("hidden");
       doc.dispatchEvent(new CustomEvent("nb:native-menu"));
     } else if (closestId(target, "p2")) {
       // Two-phone play runs on EmulatorJS: end the native session, reload on the EJS path.
@@ -113,17 +122,34 @@ export async function installNativeMode(ctx) {
   });
 
   // The native pad sits above the WebView, so any HTML panel must hide it (PLAN §1.1).
+  const wantPadVisible = () => preferred && !OVERLAY_IDS.some((id) => isShown(doc.getElementById(id)));
   const syncPad = (force = false) => {
     if (!active) return;
     const p = plugin();
     if (!p) return;
-    const covered = OVERLAY_IDS.some((id) => isShown(doc.getElementById(id)));
-    if (!force && covered === !padVisible) return;
-    padVisible = !covered;
+    const want = wantPadVisible();
+    if (!force && want === padVisible) return;
+    padVisible = want;
     try {
-      Promise.resolve(p.setPadVisible({ visible: padVisible })).catch(() => {});
+      Promise.resolve(p.setPadVisible({ visible: want })).catch(() => {});
     } catch {
       // the session may not exist yet; the post-start sync below covers it
+    }
+  };
+  // The menu stores the touch-pad choice here and never calls setPadVisible itself. Rejects when
+  // the plugin does, so the menu keeps its old state (and so do we).
+  const setPadPreference = async (visible) => {
+    const p = plugin();
+    if (!active || !p) throw new Error("no native session");
+    const before = preferred;
+    preferred = Boolean(visible);
+    const want = wantPadVisible();
+    try {
+      await p.setPadVisible({ visible: want });
+      padVisible = want;
+    } catch (e) {
+      preferred = before;
+      throw e;
     }
   };
   const MO = win.MutationObserver || globalThis.MutationObserver;
@@ -147,18 +173,29 @@ export async function installNativeMode(ctx) {
   // `nbNative.onFallback()`): the page leaves native mode and the native session is stopped
   // (which also drops its error listener) BEFORE EmulatorJS starts, so the two never run together.
   let fallbackDone = null;
-  const onFallback = () => {
+  let bootSettled = false;
+  let booting = null; // bootNative's promise, to wait for a start that is still running
+  const fallBack = (guardPendingStart) => {
     if (fallbackDone) return fallbackDone;
+    // A caller that is not bootNative (the menu) may arrive while plugin.start is still in flight:
+    // that start would finish after our stop and leave a session running behind EmulatorJS.
+    const startPending = guardPendingStart && !bootSettled && booting !== null;
     leaveNativeMode();
-    fallbackDone = stopThenLeave(() => {
+    fallbackDone = (async () => {
+      await stopThenLeave(() => {});
+      if (startPending) {
+        await within(booting);
+        await stopThenLeave(() => {}); // stop what the late start created
+      }
       try {
         bootEmulator?.();
       } catch {
         // EmulatorJS reports its own failures through the page's error box
       }
-    });
+    })();
     return fallbackDone;
   };
+  const onFallback = () => fallBack(true); // nbNative.onFallback: the menu's "classic player"
 
   doc.title = `${game.name} · NostaljiBox`;
   try {
@@ -167,11 +204,13 @@ export async function installNativeMode(ctx) {
     // orientation lock is best effort
   }
   // Extension point for the native menu (WP6): it listens for `nb:native-menu` and uses only these.
-  win.nbNative = { plugin: plugin(), game, onFallback };
+  win.nbNative = { plugin: plugin(), game, onFallback, options, setPadPreference };
 
   // bootNative takes `romName` from `game.file` for a ZIP it cannot resolve itself; hand it the inner name.
   const bootGame = inner ? { ...game, file: inner } : game;
-  await bootNative(bootGame, rom, { pad: PADS?.[game.core], onFallback });
+  booting = bootNative(bootGame, rom, { pad: PADS?.[game.core], onFallback: () => fallBack(false) })
+    .finally(() => (bootSettled = true));
+  await booting;
   if (fallbackDone) await fallbackDone; // resolve after EmulatorJS has been started
   else syncPad(true); // a panel may have been opened while the session was starting
   return true;
