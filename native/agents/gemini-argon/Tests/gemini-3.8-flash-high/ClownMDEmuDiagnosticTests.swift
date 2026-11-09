@@ -108,6 +108,7 @@ final class ClownMDEmuDiagnosticTests: XCTestCase {
 
         let sampledFrames: Set<Int> = [1, 10, 60, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200]
         var buttons: UInt16 = 0
+        var frame600NonBlack = 0
         defer { core.setInputPointer(nil) }
 
         print("** [CLOWN-DIAG] Starting 1200 frame loop for pong.md...")
@@ -123,6 +124,7 @@ final class ClownMDEmuDiagnosticTests: XCTestCase {
             if sampledFrames.contains(frameIndex) {
                 if let frame = core.latestFrame() {
                     let info = inspectFrame(frame)
+                    if frameIndex == 600 { frame600NonBlack = info.nonBlack }
                     print("** [CLOWN-DIAG][FRAME \(frameIndex)] width=\(frame.width) height=\(frame.height) pitch=\(frame.pitch) format=\(frame.format) videoFrames=\(core.videoFrames) audioFrames=\(core.audioFrames) nonBlackPixels=\(info.nonBlack) distinct16=\(info.distinct16) hex16=[\(info.hex16)]")
                 } else {
                     print("** [CLOWN-DIAG][FRAME \(frameIndex)] latestFrame() is nil! videoFrames=\(core.videoFrames) audioFrames=\(core.audioFrames)")
@@ -133,6 +135,10 @@ final class ClownMDEmuDiagnosticTests: XCTestCase {
                 print("** [CLOWN-DIAG][MEM \(frameIndex)] 68k RAM (id=\(RETRO_MEMORY_SYSTEM_RAM)): size=\(sysRam.size) nonZero=\(sysRam.nonZero) | VDP VRAM (id=\(RETRO_MEMORY_VIDEO_RAM)): size=\(vdpRam.size) nonZero=\(vdpRam.nonZero)")
             }
         }
+
+        XCTAssertGreaterThanOrEqual(core.videoFrames, 1200)
+        XCTAssertGreaterThan(core.audioFrames, 0)
+        XCTAssertGreaterThan(frame600NonBlack, 0, "pong.md should render non-black pixels by frame 600")
 
         // 4. Part 2 — Test loadGame passing ROM bytes in memory vs path, and test a tiny synthetic 68000 VDP ROM
         core.unloadGame()
