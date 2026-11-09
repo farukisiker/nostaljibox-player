@@ -11,6 +11,7 @@ import { App } from "@capacitor/app";
 import { registerPlugin } from "@capacitor/core";
 import { t } from "./i18n.js";
 import { packPeer, unpackPeer, peerToLong, peerFromLong } from "../native/agents/fable/js/peer-block.js";
+import { rankLanIps, rankCandidates, sendToInbox } from "../native/agents/fable/js/pair-net.js";
 
 const PREFIX = "NB1:";
 
@@ -109,9 +110,9 @@ function sessionFields(sdp) {
   const mids = [...sdp.matchAll(/^a=mid:(\S+)/gm)].map((m) => m[1]).join();
   const first = sdp.split(/^m=/m)[1] || "";
   // Host candidates are either IPv4 addresses or, before camera permission, mDNS names (<uuid>.local).
+  // All of them: encodeDescription ranks them (pair-net.js) and keeps the first four.
   const cands = [...first.matchAll(/^a=candidate:\S+ 1 udp \d+ (\d+\.\d+\.\d+\.\d+|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.local) (\d+) typ host/gim)]
-    .map((m) => [m[1].toLowerCase(), +m[2]])
-    .slice(0, 4);
+    .map((m) => [m[1].toLowerCase(), +m[2]]);
   if (!ufrag || !pwd || !fp || setup < 0 || mids !== "0" || !first.startsWith("application") || !cands.length) return null;
   if (ufrag.length > 255 || pwd.length > 255) return null;
   return { ufrag, pwd, fp, setup, cands };
@@ -190,14 +191,17 @@ function buildSdp(f) {
   ].join("\r\n") + "\r\n";
 }
 
-const isIPv4 = (ip) => /^\d+\.\d+\.\d+\.\d+$/.test(ip);
-
 // inbox ({ ips, port } from listenForAnswer) is added to an offer so the guest can reply over the Wi-Fi.
 // peer ({ backend, system, coreVersion, appVersion }, peer-block.js) says what this phone plays on.
-export async function encodeDescription(desc, inbox = null, peer = null) {
+// lanIps: addresses on the other phone's network (the guest passes the host's inbox addresses), so
+// the candidates in that subnet come first; a hotspot owner also has cellular, VPN and link-local
+// addresses, and the compact code keeps only four (pair-net.js rankCandidates).
+export async function encodeDescription(desc, inbox = null, peer = null, lanIps = null) {
   const fields = sessionFields(desc.sdp);
   if (fields) {
-    const ips = (inbox?.ips || []).filter(isIPv4);
+    // Private IPv4 first, link-local (169.254.x.x: Wi-Fi on but not associated, USB) dropped.
+    const ips = rankLanIps(inbox?.ips || []);
+    fields.cands = rankCandidates(fields.cands, lanIps || ips).slice(0, 4);
     if (ips.length) {
       fields.inbox = { ips, port: inbox.port };
       // Without camera permission the host's candidates are mDNS names, which phones often fail
@@ -254,18 +258,13 @@ export async function listenForAnswer(onAnswer) {
   }
 }
 
-// Sends the answer to the host's inbox; resolves true once the host has it.
+// Sends the answer to the host's inbox; resolves true once the host has it. Every address of the
+// host at once (one 10 s connection each), and a second round when all of them timed out: the first
+// connection on a phone waits behind the iOS Local Network prompt (pair-net.js sendToInbox).
 export async function sendAnswer(inbox, ufrag, code) {
   if (!native() || !inbox) return false;
-  for (const host of inbox.ips) {
-    try {
-      await PairInbox.send({ host, port: inbox.port, text: `${ufrag} ${code}` });
-      return true;
-    } catch {
-      // try the next address
-    }
-  }
-  return false;
+  const text = `${ufrag} ${code}`;
+  return sendToInbox({ ips: inbox.ips, send: (host) => PairInbox.send({ host, port: inbox.port, text }) });
 }
 
 // The ICE ufrag of an SDP: what the guest echoes back so the host knows the answer is for it.

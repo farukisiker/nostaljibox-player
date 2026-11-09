@@ -16,8 +16,10 @@
 // whatever session runs later arrive on it. Without the plugin (Android, desktop) it does nothing.
 //
 // The id is NOT in sonnet-5-5 native-mode.js OVERLAY_IDS (checked by the test), so showing it never
-// hides the native pad. z-index 55: above play.css's overlays (20/30/50), below #native-menu (60), so
-// an open menu covers it. The native pad is a UIView above the WebView, but TouchPadView.hitTest
+// hides the native pad. z-index 15: above the game, below every play.css sheet (.overlay 20: the
+// pairing panels #link/#join, #toast 30, #play-tools 50) and #native-menu (60), so a panel the user
+// opened is never covered by the pill and its buttons stay tappable (the pill is at the screen
+// centre, where the panels sit). The native pad is a UIView above the WebView, but TouchPadView.hitTest
 // returns self only inside button/zone touch areas (API.md §5); the screen centre is outside the
 // left zone, the right diamond and the bottom row, so the tap reaches this element.
 import { pickLang } from "./lang.js";
@@ -52,7 +54,7 @@ export function wantsHint(payload) {
 // max-width 240px/32vw: on 667–852 pt landscape phones a wider pill reaches into the pad's touch
 // areas (zone box + 30 pt, PadLayout.swift) and the diamond's left button; the text wraps instead.
 const STYLE =
-  "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:55;box-sizing:border-box;" +
+  "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:15;box-sizing:border-box;" +
   "max-width:min(240px,32vw);padding:10px 18px;border-radius:22px;background:rgba(0,0,0,0.72);" +
   "color:#fff;font:600 15px/1.3 -apple-system,system-ui,sans-serif;text-align:center;" +
   "cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;";

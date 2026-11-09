@@ -16,6 +16,10 @@ import { once, latch } from "../native/agents/fable/js/guards.js";
 import { startGuestGame } from "../native/agents/fable/js/native-guest.js";
 
 const $ = (s) => document.querySelector(s);
+// After the reply went over the Wi-Fi, ICE has this long to connect before the reply is also shown
+// as a code (the host applied it already in the normal case, so this mostly means the phones
+// cannot reach each other; WebKit's own "failed" says so when it comes).
+const CONNECT_WAIT_MS = 20000;
 
 // boot(game, rom, onStart) starts EmulatorJS; onStart gets it once the game runs.
 // hooks.bootNative(game, bytes, { onStarted, onError }) starts the native player instead (N0-f,
@@ -140,14 +144,16 @@ export function setupGuestLink(boot, hooks = {}) {
       pc.ondatachannel = (ev) => onChannel(ev.channel);
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "failed") {
-          status.textContent = t("connectFailed");
+          status.textContent = `${t("connectFailed")} ${nt("sameNetworkHint")}`;
           if (document.body.classList.contains("linked")) end(nt("connectionLost"));
         }
       };
       await pc.setRemoteDescription(offer);
       await pc.setLocalDescription(await pc.createAnswer());
       await gatheringDone(pc);
-      const answer = await encodeDescription(pc.localDescription, null, myPeer);
+      // The host's inbox addresses say which of this phone's addresses are on the shared network
+      // (a hotspot owner has cellular, VPN and link-local ones too): those candidates go first.
+      const answer = await encodeDescription(pc.localDescription, null, myPeer, offer.inbox?.ips || null);
       stopCamera(camera);
       $("#join-scan").classList.add("hidden");
       // Hand the answer to the host over the Wi-Fi; show it as a code only if that fails, or if
@@ -162,12 +168,14 @@ export function setupGuestLink(boot, hooks = {}) {
         status.textContent = t("showReplyHint");
       };
       status.textContent = t("sendingReply");
+      // Up to ~20 s: all of the host's addresses at once, and a second try after the iOS Local
+      // Network prompt (shared/link.js sendAnswer).
       if (await sendAnswer(offer.inbox, offer.ufrag, answer)) {
         status.textContent = t("connecting");
         const sent = pc;
         setTimeout(() => {
-          if (pc === sent && pc.connectionState !== "connected") showAnswer();
-        }, 12000);
+          if (pc === sent && pc.connectionState !== "connected" && pc.connectionState !== "failed") showAnswer();
+        }, CONNECT_WAIT_MS);
       } else {
         await showAnswer();
       }

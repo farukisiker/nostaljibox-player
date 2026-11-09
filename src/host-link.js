@@ -12,15 +12,21 @@ import { t } from "../shared/i18n.js";
 import { localPeer, pairingProblem, describePeer } from "../native/agents/fable/js/peer-block.js";
 import { startupTimeout } from "../native/agents/fable/js/startup-timeout.js";
 import { nt } from "../native/agents/fable/js/strings.js";
+import { hostReplyView } from "../native/agents/fable/js/pair-net.js";
 
 const $ = (s) => document.querySelector(s);
 const panel = $("#link");
 const status = $("#link-status");
+// After the reply is in, ICE has this long to connect before the panel says it could not
+// (WebKit's own "failed" usually comes sooner; this is the backstop).
+const CONNECT_WAIT_MS = 25000;
 
 let pc = null;
 let camera = null;
 let stopScan = null;
 let inbox = null;
+let answered = false; // a reply was applied to pc (over the Wi-Fi or by camera)
+let connectTimer = null;
 let sync = null;
 let io = null;
 let startup = null;
@@ -57,10 +63,26 @@ function stopInbox() {
   inbox = null;
 }
 
+// The reply step's scan button and camera (pair-net.js hostReplyView): the button only while the
+// reply may still come by camera; once a reply is applied, nothing is left to scan.
+function showReplyStep() {
+  const view = hostReplyView({ inbox: !!(inbox && inbox.info), camera: !!camera, scanning: !!stopScan, answered });
+  $("#link-scan").classList.toggle("hidden", !view.scanButton);
+  $("#link-cam").classList.toggle("hidden", !view.camera);
+}
+
+// The phones could not connect: both the same Wi-Fi/hotspot and Local Network access are needed.
+function connectFailed() {
+  status.textContent = `${t("connectFailed")} ${nt("sameNetworkHint")}`;
+}
+
 // Every way the link ends goes through here: the lockstep detaches (native: lockstepStop, which also
 // clears the session hold), the heartbeat and startup timers stop, the peer connection closes.
 function hangUp() {
   stopInbox();
+  clearTimeout(connectTimer);
+  connectTimer = null;
+  answered = false;
   if (startup) startup.clear();
   startup = null;
   if (sync) sync.detach();
@@ -99,7 +121,18 @@ async function accept(code) {
       return;
     }
     await pc.setRemoteDescription(answer);
+    // The reply is in (over the Wi-Fi in the normal case): the scan button would only re-read the
+    // same code, so it goes away and the panel says what is happening now.
+    answered = true;
+    if (stopScan) stopScan();
+    stopScan = null;
+    showReplyStep();
     status.textContent = t("connecting");
+    const accepted = pc;
+    clearTimeout(connectTimer);
+    connectTimer = setTimeout(() => {
+      if (pc === accepted && pc.connectionState !== "connected" && !document.body.classList.contains("linked")) connectFailed();
+    }, CONNECT_WAIT_MS);
   } catch (e) {
     status.textContent = e.message || String(e);
   }
@@ -130,8 +163,7 @@ async function start() {
   } catch {
     status.textContent = t("hostNoCamera");
   }
-  $("#link-cam").classList.toggle("hidden", !camera || !!inbox.info);
-  $("#link-scan").classList.add("hidden");
+  showReplyStep();
 
   pc = createPeer();
   const channel = pc.createDataChannel("link", { ordered: true });
@@ -210,7 +242,7 @@ async function start() {
   };
   pc.onconnectionstatechange = () => {
     if (pc && pc.connectionState === "failed") {
-      status.textContent = t("connectFailed");
+      connectFailed();
       if (document.body.classList.contains("linked")) lost();
     }
   };
@@ -225,20 +257,20 @@ async function start() {
       .catch(() => {});
   if (inbox && inbox.info) {
     status.textContent = t("hostWaitHint");
-    // If the Wi-Fi reply doesn't arrive, the guest shows it as a code; this button scans it.
+    // If the Wi-Fi reply doesn't arrive, the guest shows it as a code; this button scans it. Once a
+    // reply is in, the button is hidden (showReplyStep) and a late tap only refreshes that.
     const offered = pc;
-    $("#link-scan").classList.toggle("hidden", !camera);
     $("#link-scan").onclick = () => {
-      if (pc !== offered || pc.remoteDescription || !camera || stopScan) return;
-      $("#link-scan").classList.add("hidden");
-      $("#link-cam").classList.remove("hidden");
-      status.textContent = t("hostScanHint");
+      if (pc !== offered || !camera || stopScan || answered) return showReplyStep();
       stopScan = scanQR($("#link-cam"), accept);
+      showReplyStep();
+      status.textContent = t("hostScanHint");
     };
   } else if (camera) {
     status.textContent = t("hostScanHint");
     stopScan = scanQR($("#link-cam"), accept);
   }
+  showReplyStep();
 }
 
 export function setupHostLink(getGame) {

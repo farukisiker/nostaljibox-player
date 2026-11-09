@@ -44,7 +44,9 @@ desktop web) `installPausedHint` returns a no-op handle and touches nothing.
   paused (the engine could not start), the next `state` event shows it again.
 - Hides on `state: "running"`, on the plugin's `stopped` event and on `pagehide`.
 - Its id `native-paused-hint` is not in native-mode's `OVERLAY_IDS` (test-checked), so it never hides
-  the native pad. z-index 55: above play.css's overlays (20/30/50), below `#native-menu` (60).
+  the native pad. z-index 15: above the game, below every play.css sheet (`.overlay` 20, so the
+  pairing panels `#link`/`#join` and their buttons are never under the pill; `#toast` 30,
+  `#play-tools` 50) and `#native-menu` (60).
   The native pad is a UIView over the WebView, but `TouchPadView.hitTest` captures only its button
   and zone areas (API.md §5); the pill sits at the screen centre (max width `min(240px, 32vw)`, the
   text wraps), clear of the left zone, the right diamond and the bottom row even on 667–852 pt

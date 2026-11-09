@@ -20,6 +20,7 @@ const TABLE = {
     backendEjs: "classic player",
     backendOld: "older version",
     pausedHint: "Paused — tap to resume",
+    sameNetworkHint: "Both phones must be on the same Wi-Fi or on one phone's Personal Hotspot, and NostaljiBox needs Local Network access on both (Settings → NostaljiBox).",
   },
   tr: {
     peerMismatch: "İki telefonlu oyun için iki telefon da aynı sürüm NostaljiBox iPhone uygulamasını kullanmalı (sende {mine}, karşıda {theirs}).",
@@ -34,6 +35,7 @@ const TABLE = {
     backendEjs: "klasik oynatıcı",
     backendOld: "eski sürüm",
     pausedHint: "Duraklatıldı — devam etmek için dokun",
+    sameNetworkHint: "İki telefon aynı Wi-Fi'de ya da birinin Kişisel Erişim Noktası'nda olmalı ve NostaljiBox'ın iki telefonda da Yerel Ağ izni olmalı (Ayarlar → NostaljiBox).",
   },
   de: {
     peerMismatch: "Für das Spiel mit zwei Handys muss auf beiden dieselbe Version der NostaljiBox-iPhone-App laufen (du: {mine}, anderes Handy: {theirs}).",
@@ -48,6 +50,7 @@ const TABLE = {
     backendEjs: "klassischer Player",
     backendOld: "ältere Version",
     pausedHint: "Pausiert — zum Fortsetzen tippen",
+    sameNetworkHint: "Beide Handys müssen im selben WLAN oder im persönlichen Hotspot eines Handys sein, und NostaljiBox braucht auf beiden Zugriff auf das lokale Netzwerk (Einstellungen → NostaljiBox).",
   },
   es: {
     peerMismatch: "Para jugar con dos teléfonos, ambos necesitan la misma versión de la app NostaljiBox para iPhone (tú: {mine}, otro teléfono: {theirs}).",
@@ -62,6 +65,7 @@ const TABLE = {
     backendEjs: "reproductor clásico",
     backendOld: "versión anterior",
     pausedHint: "En pausa — toca para continuar",
+    sameNetworkHint: "Ambos teléfonos deben estar en la misma Wi-Fi o en el punto de acceso personal de uno de ellos, y NostaljiBox necesita acceso a la red local en ambos (Ajustes → NostaljiBox).",
   },
   fr: {
     peerMismatch: "Le jeu à deux téléphones nécessite la même version de l'app NostaljiBox pour iPhone sur les deux (toi : {mine}, autre téléphone : {theirs}).",
@@ -76,6 +80,7 @@ const TABLE = {
     backendEjs: "lecteur classique",
     backendOld: "ancienne version",
     pausedHint: "En pause — touche pour reprendre",
+    sameNetworkHint: "Les deux téléphones doivent être sur le même Wi-Fi ou sur le partage de connexion de l'un d'eux, et NostaljiBox doit avoir accès au réseau local sur les deux (Réglages → NostaljiBox).",
   },
   hi: {
     peerMismatch: "दो फ़ोन से खेलने के लिए दोनों फ़ोन पर NostaljiBox iPhone ऐप का एक ही वर्शन होना चाहिए (आप: {mine}, दूसरा फ़ोन: {theirs})।",
@@ -90,6 +95,7 @@ const TABLE = {
     backendEjs: "क्लासिक प्लेयर",
     backendOld: "पुराना वर्शन",
     pausedHint: "रुका हुआ — जारी रखने के लिए टैप करें",
+    sameNetworkHint: "दोनों फ़ोन एक ही Wi-Fi पर या किसी एक फ़ोन के पर्सनल हॉटस्पॉट पर होने चाहिए, और NostaljiBox को दोनों पर लोकल नेटवर्क की अनुमति चाहिए (सेटिंग्स → NostaljiBox)।",
   },
   id: {
     peerMismatch: "Main dua HP butuh versi aplikasi NostaljiBox iPhone yang sama di kedua HP (kamu: {mine}, HP lain: {theirs}).",
@@ -104,6 +110,7 @@ const TABLE = {
     backendEjs: "pemutar klasik",
     backendOld: "versi lama",
     pausedHint: "Dijeda — ketuk untuk melanjutkan",
+    sameNetworkHint: "Kedua ponsel harus berada di Wi-Fi yang sama atau di Hotspot Pribadi salah satu ponsel, dan NostaljiBox memerlukan akses Jaringan Lokal di keduanya (Pengaturan → NostaljiBox).",
   },
   it: {
     peerMismatch: "Per giocare con due telefoni serve la stessa versione dell'app NostaljiBox per iPhone su entrambi (tu: {mine}, altro telefono: {theirs}).",
@@ -118,6 +125,7 @@ const TABLE = {
     backendEjs: "player classico",
     backendOld: "versione precedente",
     pausedHint: "In pausa — tocca per riprendere",
+    sameNetworkHint: "Entrambi i telefoni devono essere sulla stessa Wi-Fi o sull'hotspot personale di uno dei due, e NostaljiBox deve avere accesso alla rete locale su entrambi (Impostazioni → NostaljiBox).",
   },
   ja: {
     peerMismatch: "2台のスマホで遊ぶには、両方に同じバージョンの NostaljiBox iPhone アプリが必要です（あなた: {mine}、相手のスマホ: {theirs}）。",
@@ -132,6 +140,7 @@ const TABLE = {
     backendEjs: "クラシックプレイヤー",
     backendOld: "古いバージョン",
     pausedHint: "一時停止中 — タップで再開",
+    sameNetworkHint: "2台のiPhoneは同じWi-Fiか、どちらかのインターネット共有につながっている必要があり、両方でNostaljiBoxにローカルネットワークの許可が必要です（設定 → NostaljiBox）。",
   },
   ko: {
     peerMismatch: "두 폰으로 플레이하려면 두 폰 모두 같은 버전의 NostaljiBox iPhone 앱이 필요해요 (나: {mine}, 상대 폰: {theirs}).",
@@ -146,6 +155,7 @@ const TABLE = {
     backendEjs: "클래식 플레이어",
     backendOld: "이전 버전",
     pausedHint: "일시정지 — 탭하여 계속",
+    sameNetworkHint: "두 휴대폰이 같은 Wi-Fi 또는 한쪽의 개인용 핫스팟에 연결되어 있어야 하며, 두 휴대폰 모두에서 NostaljiBox에 로컬 네트워크 권한이 필요합니다(설정 → NostaljiBox).",
   },
   pt: {
     peerMismatch: "Para jogar com dois celulares, os dois precisam da mesma versão do app NostaljiBox para iPhone (você: {mine}, outro celular: {theirs}).",
@@ -160,6 +170,7 @@ const TABLE = {
     backendEjs: "player clássico",
     backendOld: "versão antiga",
     pausedHint: "Pausado — toque para continuar",
+    sameNetworkHint: "Os dois telefones precisam estar no mesmo Wi-Fi ou no Acesso Pessoal de um deles, e o NostaljiBox precisa de acesso à rede local nos dois (Ajustes → NostaljiBox).",
   },
   ru: {
     peerMismatch: "Для игры на двух телефонах на обоих нужна одна и та же версия приложения NostaljiBox для iPhone (у вас: {mine}, на другом телефоне: {theirs}).",
@@ -174,6 +185,7 @@ const TABLE = {
     backendEjs: "классический плеер",
     backendOld: "старая версия",
     pausedHint: "Пауза — нажмите, чтобы продолжить",
+    sameNetworkHint: "Оба телефона должны быть в одной сети Wi-Fi или в режиме модема одного из них, и NostaljiBox нужен доступ к локальной сети на обоих (Настройки → NostaljiBox).",
   },
   zh: {
     peerMismatch: "两部手机一起玩需要两部手机都安装相同版本的 NostaljiBox iPhone 应用（你：{mine}，另一部手机：{theirs}）。",
@@ -188,6 +200,7 @@ const TABLE = {
     backendEjs: "经典播放器",
     backendOld: "旧版本",
     pausedHint: "已暂停 — 点按继续",
+    sameNetworkHint: "两部手机必须连接同一个 Wi-Fi，或连接其中一部的个人热点，并且两部手机都需要允许 NostaljiBox 访问本地网络（设置 → NostaljiBox）。",
   },
 };
 

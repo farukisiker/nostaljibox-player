@@ -170,7 +170,7 @@ test("shows on a pause, stays hidden for a transient one, hides on running", () 
   assert.equal(el.parentNode, doc.body);
   assert.match(el.attrs.style, /position:fixed/);
   assert.match(el.attrs.style, /left:50%;top:50%/);
-  assert.match(el.attrs.style, /z-index:55/); // below #native-menu (60), above play.css overlays
+  assert.match(el.attrs.style, /z-index:15;/); // above the game, below the play.css sheets (.overlay 20) and #native-menu (60)
   assert.match(el.attrs.style, /max-width:min\(240px,32vw\)/); // clear of the pad's touch areas in landscape
   assert.doesNotMatch(el.attrs.style, /white-space:\s*nowrap/); // the text wraps inside that width
   assert.equal(el.attrs.role, "button");
