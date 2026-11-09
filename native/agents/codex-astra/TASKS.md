@@ -1,5 +1,24 @@
 # WP2 / M1b task ledger
 
+## M2 checkpoint (2026-11-09 07:54)
+
+Current baseline ca44689 includes Fable's follow-up fixes; architect reports green CI and build-95
+iPhone XR PAL test passing at 50/50 fps, 71 MB. Frozen build-95 refs must never be modified.
+Previous M1b rows below are historical; M1b was completed and device-tested after those rows were written.
+
+| Item | Model | Agent/thread ID | Files | Status | % | ETA local | Resume |
+|---|---|---|---|---|---:|---|---|
+| 1a Session save states + roundtrip tests | gpt-6.1-sol | /root/sol_m2_states | LibretroHost/gpt-6.1-sol/, Tests/gpt-6.1-sol/ | reviewed; checkpoint/CI pending | 85 | 08:05 | followup_task(target="/root/sol_m2_states", message="...") |
+| 1b Plugin state API | gpt-6.1-terra | /root/terra_m2_states | NativePlayerPlugin/gpt-6.1-terra/ | reviewed; checkpoint/CI pending | 85 | 08:05 | followup_task(target="/root/terra_m2_states", message="...") |
+| 2 Inactive start, fixture filter, termination SRAM flush | existing file models | pending | corresponding model folders | queued until item 1 checkpoint | 0 | 08:15 | pending |
+| 3 Fable review | lead | /root | TASKS.md | reviewing | 20 | 08:20 | root |
+| 4 Route-loss manual resume | gpt-6.1-sol | pending | LibretroHost/gpt-6.1-sol/ | optional after 1–3 | 0 | 08:25 | pending |
+
+Initial review concern for item 3: Fable's drop-oldest ring now permits producer writes to non-atomic
+sample storage concurrently with consumer reads. CAS/fetch_add on readIndex does not protect payload
+access; overlapping drop/read can also advance readIndex beyond writeIndex. This is a real concurrency
+issue to validate and route after the save-state/queued-fix checkpoints; no frozen-build changes.
+
 Lead: codex-astra (gpt-6-astra). Implementation is delegated; existing lead code stays in place.
 Baseline: b372869, CI 42529815236 passed, including the real Supafaust 600-frame/replay test.
 CLI model probes failed before model startup (home unavailable). Built-in probes returned READY for

@@ -22,6 +22,7 @@ public final class EmulatorSession {
     private let buttons = UnsafeMutablePointer<UInt16>.allocate(capacity: 1)
     private var storage: SaveStoring?
     private var romHash = ""
+    private var gameId = ""
     private var savedRAM: Data?
     private var pauses = PauseCoordinator()
     private var producing = false
@@ -86,12 +87,13 @@ public final class EmulatorSession {
         return SessionError(code: "internal", message: error.localizedDescription)
     }
 
-    public func start(coreURL: URL, romURL: URL, romHash: String, storage: SaveStoring,
+    public func start(coreURL: URL, romURL: URL, romHash: String, gameId: String = "", storage: SaveStoring,
                       input: InputSource? = nil, renderer: MetalRenderer? = nil,
                       completion: @escaping (Result<[String: Any], Error>) -> Void) {
         enqueue { [self] in
             if core != nil { _ = teardown(reason: "user") }
             self.storage = storage; self.romHash = romHash
+            self.gameId = gameId.isEmpty ? romHash : gameId
             self.input = input; self.renderer = renderer
             do {
                 let loaded = try LibretroCore(executableURL: coreURL, systemDirectory: storage.systemDirectory,
@@ -153,7 +155,7 @@ public final class EmulatorSession {
         let saved = saveSRAM()
         core?.setInputPointer(nil)
         core?.unloadGame(); core?.deinitCore(); core = nil
-        input = nil; storage = nil; savedRAM = nil; geometry = [:]
+        input = nil; storage = nil; gameId = ""; savedRAM = nil; geometry = [:]
         pauses.end()
         if existed { emit("stopped", ["reason": reason]) }
         return saved
@@ -240,6 +242,90 @@ public final class EmulatorSession {
 
     public func reset(completion: @escaping () -> Void = {}) {
         enqueue { [self] in core?.reset(); main(completion) }
+    }
+
+    // State operations share the core executor with ticks, so serialization never races retro_run.
+    private func stateOperation<T>(_ completion: @escaping (Result<T, Error>) -> Void,
+                                   action: @escaping () throws -> T) {
+        enqueue { [self] in
+            let result: Result<T, Error>
+            do {
+                guard started, core != nil else { throw SessionError(code: "no-session", message: "No active game") }
+                result = .success(try action())
+            } catch { result = .failure(Self.error(error)) }
+            main { completion(result) }
+        }
+    }
+    private func stateURL(slot: Int) throws -> URL {
+        guard (1...3).contains(slot) else { throw SessionError(code: "internal", message: "State slot must be 1, 2 or 3") }
+        guard let storage = storage else { throw SessionError(code: "no-session", message: "No active save store") }
+        return storage.stateURL(gameId: gameId, slot: slot)
+    }
+    private func serializedState() throws -> Data {
+        guard let data = core?.serialize(), !data.isEmpty else {
+            throw SessionError(code: "internal", message: "Core could not serialize state")
+        }
+        return data
+    }
+    private func restoreState(_ data: Data) throws {
+        guard !data.isEmpty else { throw SessionError(code: "internal", message: "Empty state data") }
+        let wasProducing = producing
+        clock?.pause()
+        // reset stops the engine before clearing both the queued samples and resampler history.
+        audio?.reset()
+        producing = false
+        defer {
+            // Do not use reevaluate: its startup prefill advances the newly restored core.
+            // All pause reasons remain intact, including when the core rejects the state.
+            if wasProducing {
+                do {
+                    try audio?.start()
+                    producing = true
+                    clock?.start()
+                    sampleTime = ProcessInfo.processInfo.systemUptime; sampleFrames = frame
+                    tickStats = TickStats()
+                } catch {
+                    audioRetry = true
+                    pauses.set("interruption", active: true)
+                    fps = 0; linkHz = 0; coreMs = 0; uploadMs = 0
+                    emit("state", ["state": "paused", "reasons": pauses.reasons.sorted()])
+                }
+            }
+        }
+        guard core?.unserialize(data) == true else {
+            throw SessionError(code: "internal", message: "Core rejected state data")
+        }
+    }
+    public func saveState(slot: Int, completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        stateOperation(completion) { [self] in
+            let url = try stateURL(slot: slot)
+            let data = try serializedState()
+            try data.write(to: url, options: .atomic)
+            return ["bytes": data.count]
+        }
+    }
+    public func loadState(slot: Int, completion: @escaping (Result<Void, Error>) -> Void) {
+        stateOperation(completion) { [self] in
+            let url = try stateURL(slot: slot)
+            let data: Data
+            do { data = try Data(contentsOf: url) }
+            catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+                throw SessionError(code: "no-state", message: "No saved state in slot \(slot)")
+            }
+            try restoreState(data)
+        }
+    }
+    public func listStates(completion: @escaping (Result<[[String: Any]], Error>) -> Void) {
+        stateOperation(completion) { [self] in
+            guard let storage = storage else { throw SessionError(code: "no-session", message: "No active save store") }
+            return storage.listStates(gameId: gameId).map { ["slot": $0.slot, "mtime": $0.mtime.timeIntervalSince1970 * 1000] }
+        }
+    }
+    public func serializeState(completion: @escaping (Result<Data, Error>) -> Void) {
+        stateOperation(completion) { [self] in try serializedState() }
+    }
+    public func unserializeState(_ data: Data, completion: @escaping (Result<Void, Error>) -> Void) {
+        stateOperation(completion) { [self] in try restoreState(data) }
     }
     public func setScaling(_ mode: String) { enqueue { [self] in renderer?.setScaling(mode) } }
     public func setStatsVisible(_ visible: Bool) { enqueue { [self] in statsVisible = visible } }

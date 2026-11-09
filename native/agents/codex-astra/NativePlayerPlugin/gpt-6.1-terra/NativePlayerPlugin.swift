@@ -168,7 +168,7 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
                                 session.setScaling(scaling)
                                 session.setStatsVisible(showStats)
                                 session.setPauseReason("background", active: UIApplication.shared.applicationState == .background)
-                                session.start(coreURL: coreURL, romURL: romURL, romHash: hash, storage: storage, input: input, renderer: renderer) { result in
+                                session.start(coreURL: coreURL, romURL: romURL, romHash: hash, gameId: id, storage: storage, input: input, renderer: renderer) { result in
                                     switch result {
                                         case .success(let info): call.resolve(info)
                                         case .failure(let error): self.stopCurrent(reason: "error") { _ in let e = error as? SessionError
@@ -339,11 +339,58 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
             return }
         io.async { do { let bytes = try self.store().deleteGame(gameId: id)
                 call.resolve(["removedBytes": bytes]) } catch { call.reject(error.localizedDescription, "internal") } } }
-    @objc func saveState(_ call: CAPPluginCall) { call.reject("Save states are unavailable", "unavailable") }
-    @objc func loadState(_ call: CAPPluginCall) { call.reject("Save states are unavailable", "unavailable") }
-    @objc func listStates(_ call: CAPPluginCall) { call.reject("Save states are unavailable", "unavailable") }
-    @objc func getStateBase64(_ call: CAPPluginCall) { call.reject("Save states are unavailable", "unavailable") }
-    @objc func loadStateBase64(_ call: CAPPluginCall) { call.reject("Save states are unavailable", "unavailable") }
+    private func rejectStateError(_ call: CAPPluginCall, _ error: Error) {
+        let failure = error as? SessionError
+        call.reject(failure?.message ?? error.localizedDescription, failure?.code ?? "internal")
+    }
+    @objc func saveState(_ call: CAPPluginCall) { withSession(call) { session, done in
+        guard let slot = call.getInt("slot"), (1...3).contains(slot) else { call.reject("Invalid state slot", "internal"); done(); return }
+        session.saveState(slot: slot) { result in
+            switch result {
+            case .success(let payload): call.resolve(payload)
+            case .failure(let error): self.rejectStateError(call, error)
+            }
+            done()
+        }
+    } }
+    @objc func loadState(_ call: CAPPluginCall) { withSession(call) { session, done in
+        guard let slot = call.getInt("slot"), (1...3).contains(slot) else { call.reject("Invalid state slot", "internal"); done(); return }
+        session.loadState(slot: slot) { result in
+            switch result {
+            case .success: call.resolve()
+            case .failure(let error): self.rejectStateError(call, error)
+            }
+            done()
+        }
+    } }
+    @objc func listStates(_ call: CAPPluginCall) { withSession(call) { session, done in
+        session.listStates { result in
+            switch result {
+            case .success(let states): call.resolve(["states": states])
+            case .failure(let error): self.rejectStateError(call, error)
+            }
+            done()
+        }
+    } }
+    @objc func getStateBase64(_ call: CAPPluginCall) { withSession(call) { session, done in
+        session.serializeState { result in
+            switch result {
+            case .success(let data): call.resolve(["data": data.base64EncodedString()])
+            case .failure(let error): self.rejectStateError(call, error)
+            }
+            done()
+        }
+    } }
+    @objc func loadStateBase64(_ call: CAPPluginCall) { withSession(call) { session, done in
+        guard let encoded = call.getString("data"), let data = Data(base64Encoded: encoded), !data.isEmpty else { call.reject("Invalid state data", "internal"); done(); return }
+        session.unserializeState(data) { result in
+            switch result {
+            case .success: call.resolve()
+            case .failure(let error): self.rejectStateError(call, error)
+            }
+            done()
+        }
+    } }
 }
 
 
