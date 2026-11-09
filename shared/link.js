@@ -10,6 +10,7 @@ import { Clipboard } from "@capacitor/clipboard";
 import { App } from "@capacitor/app";
 import { registerPlugin } from "@capacitor/core";
 import { t } from "./i18n.js";
+import { packPeer, unpackPeer, peerToLong, peerFromLong } from "../native/agents/fable/js/peer-block.js";
 
 const PREFIX = "NB1:";
 
@@ -67,8 +68,9 @@ export function minimizeSdp(sdp) {
 // SDP shape (one data channel), so only the per-session fields travel: ICE ufrag/password, the
 // DTLS fingerprint, the DTLS role and the host candidates (IPv4 or mDNS name). About 90 bytes,
 // in base32 so the QR uses alphanumeric mode. NB2 was the same for the old video-streaming SDP.
-// An offer may end with the host's inbox (its LAN addresses and a TCP port); older versions
-// ignore those trailing bytes.
+// Both end with the inbox block (the host's LAN addresses and a TCP port; 0 addresses and port 0
+// when there is none, so the block is always there) and then the tagged peer block (backend and
+// version, peer-block.js). Older versions read the inbox and ignore the bytes after it.
 const PREFIX3 = "NB3:";
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const SETUPS = ["actpass", "active", "passive"];
@@ -126,10 +128,12 @@ function packFields(type, f) {
     else bytes.push(0, ...host.split(".").map(Number));
     bytes.push(port >> 8, port & 255);
   }
-  if (f.inbox) {
-    const ips = f.inbox.ips.slice(0, 3);
-    bytes.push(ips.length, ...ips.flatMap((ip) => ip.split(".").map(Number)), f.inbox.port >> 8, f.inbox.port & 255);
-  }
+  // The inbox block is always written (0 addresses, port 0 without one): the decoder takes
+  // whatever follows the candidates as the inbox, so the peer block needs it in front.
+  const ips = f.inbox ? f.inbox.ips.slice(0, 3) : [];
+  const port = f.inbox ? f.inbox.port : 0;
+  bytes.push(ips.length, ...ips.flatMap((ip) => ip.split(".").map(Number)), port >> 8, port & 255);
+  if (f.peer) bytes.push(...packPeer(f.peer));
   return new Uint8Array(bytes);
 }
 
@@ -156,14 +160,21 @@ function unpackFields(bytes) {
     i += 2;
   }
   let inbox = null;
+  let peer = null;
   if (i < bytes.length) {
     const ips = [];
     for (let n = bytes[i++]; n > 0; n--, i += 4) ips.push([...bytes.subarray(i, i + 4)].join("."));
-    inbox = { ips, port: (bytes[i] << 8) | bytes[i + 1] };
+    if (ips.length) inbox = { ips, port: (bytes[i] << 8) | bytes[i + 1] };
     i += 2;
+    // Tagged peer block after the inbox; anything else there (no block = old version) is ignored.
+    const tail = i < bytes.length ? unpackPeer(bytes, i) : null;
+    if (tail) {
+      peer = tail.peer;
+      i = tail.end;
+    }
   }
   if (!setup || !cands.length || i > bytes.length) throw new Error("bad code");
-  return { type, setup, ufrag, pwd, fp, cands, inbox };
+  return { type, setup, ufrag, pwd, fp, cands, inbox, peer };
 }
 
 // Rebuilds the SDP the other phone produced.
@@ -182,7 +193,8 @@ function buildSdp(f) {
 const isIPv4 = (ip) => /^\d+\.\d+\.\d+\.\d+$/.test(ip);
 
 // inbox ({ ips, port } from listenForAnswer) is added to an offer so the guest can reply over the Wi-Fi.
-export async function encodeDescription(desc, inbox = null) {
+// peer ({ backend, system, coreVersion, appVersion }, peer-block.js) says what this phone plays on.
+export async function encodeDescription(desc, inbox = null, peer = null) {
   const fields = sessionFields(desc.sdp);
   if (fields) {
     const ips = (inbox?.ips || []).filter(isIPv4);
@@ -192,22 +204,26 @@ export async function encodeDescription(desc, inbox = null) {
       // to resolve. The name only hides the address of the same socket, so put the real one in.
       fields.cands = fields.cands.map(([h, p]) => [h.endsWith(".local") ? ips[0] : h, p]);
     }
+    fields.peer = peer;
     return PREFIX3 + toBase32(packFields(desc.type, fields));
   }
   // Unusual SDP (e.g. mDNS candidates): fall back to the full compressed form.
-  return PREFIX + (await deflate(JSON.stringify({ t: desc.type, s: minimizeSdp(desc.sdp) })));
+  const long = { t: desc.type, s: minimizeSdp(desc.sdp) };
+  if (peer) long.p = peerToLong(peer);
+  return PREFIX + (await deflate(JSON.stringify(long)));
 }
 
+// Resolves { type, sdp, inbox?, ufrag?, peer }; peer is null for codes from older versions.
 export async function decodeDescription(code) {
   code = code.trim();
   if (/^NB2:/i.test(code)) throw new Error(t("oldVersion"));
   if (code.toUpperCase().startsWith(PREFIX3)) {
     const f = unpackFields(fromBase32(code.slice(PREFIX3.length).toUpperCase()));
-    return { type: f.type, sdp: buildSdp(f), inbox: f.inbox, ufrag: f.ufrag };
+    return { type: f.type, sdp: buildSdp(f), inbox: f.inbox, ufrag: f.ufrag, peer: f.peer };
   }
   if (!code.startsWith(PREFIX)) throw new Error(t("notACode"));
-  const { t, s } = JSON.parse(await inflate(code.slice(PREFIX.length)));
-  return { type: t, sdp: s };
+  const { t, s, p } = JSON.parse(await inflate(code.slice(PREFIX.length)));
+  return { type: t, sdp: s, peer: peerFromLong(p) };
 }
 
 const isCode = (text) => text.startsWith(PREFIX) || /^NB[23]:/i.test(text);
