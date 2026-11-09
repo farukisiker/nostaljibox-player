@@ -177,6 +177,7 @@ async function start() {
     // epoch; the guest then has 30 s to answer `ready`, as at game start. A state that cannot be
     // taken or sent, or a fourth resync within a minute, ends the link (the guest gets `abort`).
     sync.onResyncSent = () => startup && startup.expect("ready");
+    sync.onResynced = () => toast(nt("resynced")); // the guest answered ready: both phones run again
     sync.onResyncFailed = (err) => {
       if (io) io.send({ t: "abort", reason: "state" });
       toast(nt("resyncFailed", { code: err?.code || "state" }));

@@ -150,7 +150,7 @@ export class LockstepNative {
   recover(frame) {
     if (!this.isHost || !this.active || !this.started) return;
     const t = this.now();
-    const last = this.resyncTimes.at(-1);
+    const last = this.resyncTimes[this.resyncTimes.length - 1]; // no Array.at: the app targets iOS 15.0
     if (last !== undefined && t - last < RESYNC_MIN_GAP_MS) {
       this.log("lockstep: resync throttled", frame);
       return;
@@ -195,6 +195,8 @@ export class LockstepNative {
       this.call("lockstepStart", this.startParams(0));
       this.call("lockstepHold", { hold: false });
       this.io.armHeartbeat?.();
+      // After a resync (not the boot-time start) both phones run again: tell the player.
+      if (this.resyncs > 0) this.onResynced?.(this.epoch);
     }
   }
 

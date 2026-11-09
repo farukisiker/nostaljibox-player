@@ -102,7 +102,10 @@ test("host: ready → lockstepStart(role 0) then hold(false) with no await in be
   const before = plugin.calls.length;
   sync.onMessage({ t: "ready", epoch: 0 }); // old epoch
   assert.equal(plugin.calls.length, before);
+  let resynced = 0;
+  sync.onResynced = () => (resynced += 1);
   sync.onMessage({ t: "ready", epoch: 1 });
+  assert.equal(resynced, 0); // the boot-time start is not a resync
   // Synchronous: both calls are queued before this line.
   assert.deepEqual(plugin.names().slice(before), ["lockstepStart", "lockstepHold"]);
   assert.deepEqual(plugin.calls[before].args, { role: 0, epoch: 1, applied: [0, 0], delay: 4, batch: 2, checkEvery: 300 });
@@ -190,7 +193,10 @@ test("resync, host side: checksums of the old epoch are ignored while the state 
   // Guest inputs for epoch 2 arrive before our start: the driver model buffers them.
   h.sync.onMessage(["i", 2, 4, [8, 9]]);
   assert.deepEqual([...h.plugin.pending.get(2)], [[4, 8], [5, 9]]);
+  let resynced = null;
+  h.sync.onResynced = (epoch) => (resynced = epoch);
   h.sync.onMessage({ t: "ready", epoch: 2 });
+  assert.equal(resynced, 2); // host-link toasts "Re-synced" here (not at the boot-time ready)
   assert.deepEqual(h.since(), ["pushRemoteInputs", "lockstepStart", "lockstepHold"]);
   assert.deepEqual(h.plugin.calls.at(-2).args, { role: 0, epoch: 2, applied: [0, 0], delay: 4, batch: 2, checkEvery: 300 });
   assert.deepEqual(h.plugin.calls.at(-1).args, { hold: false });
