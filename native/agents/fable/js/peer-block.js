@@ -5,13 +5,17 @@
 //
 // Compact code (NB3) layout, right after the inbox block (which the new encoder always writes):
 //   0x50 + version (one tag byte; v1 = 0x51), backend, system, coreVersion[7] (ASCII, 0-padded),
-//   appLen, appVersion bytes. Old decoders stop after the inbox block and never see the tag.
-// Long form (NB1 JSON) carries the same thing as `p: { b, s, c, a }`.
+//   appLen, appVersion bytes, flags (one byte, NETPLAY.md §12.2: bit0 = tcp, "this host accepts a
+//   PairInbox TCP channel for this invite"; always written, 0 in answers). Old decoders stop after
+//   the inbox block (or, the first v1 ones, after appVersion) and never see the rest. Blocks added
+//   later go after the flags byte.
+// Long form (NB1 JSON) carries the same thing as `p: { b, s, c, a, f }` (f = the flags bits).
 
 export const PEER_TAG = 0x50;
 export const PEER_VERSION = 1;
 export const BACKEND_EJS = 0;
 export const BACKEND_NATIVE = 1;
+export const FLAG_TCP = 1;
 const CORE_VERSION_LEN = 7;
 
 // One byte per system (shared/systems.js order); 0 = unknown.
@@ -26,6 +30,7 @@ export const systemName = (code) => SYSTEMS[code] || "";
 const ascii = (s, max) => [...String(s || "")].map((c) => c.charCodeAt(0) & 0x7f).slice(0, max);
 
 // The peer this phone announces: native when a native session (plugin) is active, EJS otherwise.
+// No `tcp` here: host-link.js sets it once its PairInbox can accept a channel (NETPLAY.md §12.2).
 export async function localPeer({ plugin, system }) {
   if (plugin) {
     const info = (await plugin.isAvailable({ system }).catch(() => null)) || {};
@@ -38,10 +43,11 @@ export function packPeer(peer) {
   const core = ascii(peer.coreVersion, CORE_VERSION_LEN);
   while (core.length < CORE_VERSION_LEN) core.push(0);
   const app = ascii(peer.appVersion, 255);
-  return [PEER_TAG + PEER_VERSION, peer.backend ? 1 : 0, systemCode(peer.system), ...core, app.length, ...app];
+  return [PEER_TAG + PEER_VERSION, peer.backend ? 1 : 0, systemCode(peer.system), ...core, app.length, ...app, peer.tcp ? FLAG_TCP : 0];
 }
 
 // { peer, end } when a v1 block starts at bytes[i]; null for anything else (old or foreign tail).
+// A block from an encoder before the flags byte ends after appVersion: tcp false.
 export function unpackPeer(bytes, i) {
   // tag, backend, system, coreVersion[7], appLen = 11 bytes before the app string
   if (bytes[i] !== PEER_TAG + PEER_VERSION || i + 4 + CORE_VERSION_LEN > bytes.length) return null;
@@ -53,18 +59,26 @@ export function unpackPeer(bytes, i) {
   const appLen = bytes[j++];
   if (j + appLen > bytes.length) return null;
   const appVersion = String.fromCharCode(...bytes.subarray(j, j + appLen));
-  return { peer: { backend, system, coreVersion, appVersion }, end: j + appLen };
+  let end = j + appLen;
+  const flags = end < bytes.length ? bytes[end++] : 0;
+  return { peer: { backend, system, coreVersion, appVersion, tcp: !!(flags & FLAG_TCP) }, end };
 }
 
-export const peerToLong = (peer) => ({ b: peer.backend ? 1 : 0, s: peer.system || "", c: peer.coreVersion || "", a: peer.appVersion || "" });
+export const peerToLong = (peer) => ({
+  b: peer.backend ? 1 : 0, s: peer.system || "", c: peer.coreVersion || "", a: peer.appVersion || "", f: peer.tcp ? FLAG_TCP : 0,
+});
 
 export function peerFromLong(p) {
   if (!p || typeof p !== "object") return null;
-  return { backend: p.b ? BACKEND_NATIVE : BACKEND_EJS, system: String(p.s || ""), coreVersion: String(p.c || ""), appVersion: String(p.a || "") };
+  return {
+    backend: p.b ? BACKEND_NATIVE : BACKEND_EJS, system: String(p.s || ""), coreVersion: String(p.c || ""), appVersion: String(p.a || ""),
+    tcp: !!((Number(p.f) || 0) & FLAG_TCP),
+  };
 }
 
 // null = the pair can play; "mismatch" = different backend or native version; "legacy" = the other
 // side sent no block (old app) while this side is native. Two EJS phones always pair, as today.
+// The tcp flag plays no part: it only picks the transport (tcp-channel.js shouldTryTcp).
 export function pairingProblem(mine, theirs) {
   if (!theirs) return mine && mine.backend === BACKEND_NATIVE ? "legacy" : null;
   if ((mine?.backend ?? BACKEND_EJS) !== theirs.backend) return "mismatch";

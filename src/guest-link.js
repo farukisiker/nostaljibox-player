@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Guest side of two-phone play: pairs with the host phone by QR code, receives the game from it
 // (never added to the library; the native player keeps a copy on disk under `nostaljibox-link`
-// until the next join, NETPLAY.md §5) and runs it in lockstep as player 2.
+// until the next join, NETPLAY.md §5) and runs it in lockstep as player 2. With a native host that
+// offers it, a native guest connects over the PairInbox TCP channel first (NETPLAY.md §12) and only
+// answers over WebRTC when that fails.
 import {
   createPeer, gatheringDone, encodeDescription, decodeDescription, drawQR, openCamera, stopCamera, scanQR,
-  shareInvite, pasteCode, findCode, onInviteLink, sendAnswer,
+  shareInvite, pasteCode, findCode, onInviteLink, sendAnswer, pairInbox,
 } from "../shared/link.js";
 import { channelIO, createLockstep } from "./lockstep.js";
 import { toast } from "./host-link.js";
@@ -14,6 +16,7 @@ import { startupTimeout } from "../native/agents/fable/js/startup-timeout.js";
 import { nt } from "../native/agents/fable/js/strings.js";
 import { once, latch } from "../native/agents/fable/js/guards.js";
 import { startGuestGame } from "../native/agents/fable/js/native-guest.js";
+import { hasChannels, openChannel, shouldTryTcp } from "../native/agents/opus-5-5/js/tcp-channel.js";
 
 const $ = (s) => document.querySelector(s);
 // After the reply went over the Wi-Fi, ICE has this long to connect before the reply is also shown
@@ -30,6 +33,7 @@ const CONNECT_WAIT_MS = 20000;
 export function setupGuestLink(boot, hooks = {}) {
   const status = $("#join-status");
   let pc = null;
+  let link = null; // the PairInbox TCP channel, when the host took one
   let camera = null;
   let stopScan = null;
   let sync = null;
@@ -53,6 +57,7 @@ export function setupGuestLink(boot, hooks = {}) {
     sync = null;
     if (startup) startup.clear();
     if (io) io.close();
+    if (link) link.close(); // the native link outlives the page otherwise
     if (!native && window.EJS_emulator && window.EJS_emulator.pause) window.EJS_emulator.pause();
     if (native && hooks.stopNative) hooks.stopNative(); // the game must not run on alone until the library loads
     leave(msg);
@@ -139,6 +144,22 @@ export function setupGuestLink(boot, hooks = {}) {
         offering.release(); // a pasted invite from a matching phone may still follow
         return; // #back ("Back to library") stays on screen
       }
+      // Two native iPhones: the host's PairInbox TCP channel first (works on a Personal Hotspot,
+      // where WebRTC cannot connect). The camera stays on: a WebRTC fallback needs it for the LAN
+      // candidates. No channel within ~20 s (two rounds) → the WebRTC answer below, as before.
+      if (shouldTryTcp({ offer, myPeer, supported: hasChannels() })) {
+        status.textContent = t("connecting");
+        link = await openChannel({ plugin: pairInbox(), hosts: offer.inbox.ips, port: offer.inbox.port, token: offer.ufrag });
+        if (link) {
+          if (stopScan) stopScan(); // the camera may have come up during the attempt
+          stopScan = null;
+          stopCamera(camera);
+          camera = null;
+          $("#join-scan").classList.add("hidden");
+          onChannel(link); // sets link.onclose = end(hostLeft)
+          return; // the offering latch stays taken: no second pairing
+        }
+      }
       status.textContent = t("preparingConnection");
       pc = createPeer();
       pc.ondatachannel = (ev) => onChannel(ev.channel);
@@ -204,7 +225,7 @@ export function setupGuestLink(boot, hooks = {}) {
     try {
       const stream = await openCamera($("#join-cam"));
       // The invite may have been pasted while the camera was starting; don't scan during the game.
-      if (pc) return stopCamera(stream);
+      if (pc || link) return stopCamera(stream);
       camera = stream;
       stopScan = scanQR($("#join-cam"), onOffer);
     } catch {
@@ -215,6 +236,7 @@ export function setupGuestLink(boot, hooks = {}) {
   window.addEventListener("pagehide", () => {
     stopCamera(camera);
     if (io) io.close();
+    if (link) link.close();
     if (pc) pc.close();
     if (native && hooks.stopNative) hooks.stopNative();
   });

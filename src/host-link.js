@@ -2,10 +2,11 @@
 // Host side of two-phone play: sends the ROM and a savestate to the guest phone, then both run
 // the game in lockstep with the guest as player 2. The host keeps playing on whatever runs here
 // (EmulatorJS, or the native player on iPhone); the invite says which, and only a guest on the same
-// backend and version is accepted (NETPLAY.md §1.1).
+// backend and version is accepted (NETPLAY.md §1.1). Two native iPhones use the PairInbox TCP
+// channel when they can (NETPLAY.md §12, works on a Personal Hotspot); everything else WebRTC.
 import {
   createPeer, gatheringDone, encodeDescription, decodeDescription, drawQR, openCamera, stopCamera, scanQR,
-  shareInvite, pasteCode, findCode, onInviteLink, listenForAnswer, iceUfrag,
+  shareInvite, pasteCode, findCode, onInviteLink, listenForAnswer, iceUfrag, pairInbox,
 } from "../shared/link.js";
 import { channelIO, createLockstep } from "./lockstep.js";
 import { t } from "../shared/i18n.js";
@@ -13,6 +14,7 @@ import { localPeer, pairingProblem, describePeer } from "../native/agents/fable/
 import { startupTimeout } from "../native/agents/fable/js/startup-timeout.js";
 import { nt } from "../native/agents/fable/js/strings.js";
 import { hostReplyView } from "../native/agents/fable/js/pair-net.js";
+import { hasChannels, acceptChannel } from "../native/agents/opus-5-5/js/tcp-channel.js";
 
 const $ = (s) => document.querySelector(s);
 const panel = $("#link");
@@ -22,6 +24,9 @@ const status = $("#link-status");
 const CONNECT_WAIT_MS = 25000;
 
 let pc = null;
+let rtc = null; // the WebRTC data channel of pc
+let link = null; // the PairInbox TCP channel, when the guest connected that way
+let tcpAccept = null; // takes the guest's TCP channel while the invite is up (tcp-channel.js)
 let camera = null;
 let stopScan = null;
 let inbox = null;
@@ -80,6 +85,8 @@ function connectFailed() {
 // clears the session hold), the heartbeat and startup timers stop, the peer connection closes.
 function hangUp() {
   stopInbox();
+  if (tcpAccept) tcpAccept.stop();
+  tcpAccept = null;
   clearTimeout(connectTimer);
   connectTimer = null;
   answered = false;
@@ -89,8 +96,11 @@ function hangUp() {
   sync = null;
   if (io) io.close();
   io = null;
+  if (link) link.close(); // a local close: no onclose, so no second hangUp
+  link = null;
   if (pc) pc.close();
   pc = null;
+  rtc = null;
   document.body.classList.remove("linked");
 }
 
@@ -138,6 +148,97 @@ async function accept(code) {
   }
 }
 
+// The guest is connected (WebRTC data channel or PairInbox TCP channel; channelIO takes either):
+// the ROM goes out, then the state, and both phones play. `e` / `native`: what runs here (start()).
+function linkUp(channel, e, native) {
+  stopInbox();
+  closePanel();
+  document.body.classList.add("linked");
+  toast(t("p2Connected"));
+  const { game, rom } = currentGame();
+  io = channelIO(
+    channel,
+    (msg, bytes) => {
+      if (!sync) return; // a late message after hangUp
+      if (msg.t === "booted") {
+        startup.got("booted");
+        // The native lockstep resolves once the state's last chunk is queued; then the guest has
+        // 30 s to answer `ready`. The EJS resync returns nothing and has no timeout.
+        Promise.resolve(sync.resync())
+          .then(() => startup && startup.expect("ready"))
+          .catch(() => {
+            // getStateBase64 or the send failed: don't stay frozen for a ready that cannot come.
+            if (io) io.send({ t: "abort", reason: "state" });
+            toast(nt("guestStartFailed"));
+            hangUp();
+          });
+      } else if (msg.t === "abort") {
+        // The guest could not start the game, or could not load a resync's state (or gave up):
+        // back to single player here.
+        toast(sync.resyncs > 0 ? nt("resyncFailed", { code: msg.reason || "abort" }) : nt("guestStartFailed"));
+        hangUp();
+      } else {
+        if (msg.t === "ready") {
+          startup.got("ready");
+          io.armHeartbeat(); // the game runs on both phones: 5 s of silence now ends the link
+        }
+        sync.onMessage(msg, bytes);
+      }
+    },
+    { native: !!native, onLost: lost },
+  );
+  sync = createLockstep(e, io, true, (waiting) => waiting && toast(t("waitingP2")));
+  // Native only (N1-b, lockstep-native.js): a checksum mismatch resends the state with the next
+  // epoch; the guest then has 30 s to answer `ready`, as at game start. A state that cannot be
+  // taken or sent, or a fourth resync within a minute, ends the link (the guest gets `abort`).
+  sync.onResyncSent = () => startup && startup.expect("ready");
+  sync.onResynced = () => toast(nt("resynced")); // the guest answered ready: both phones run again
+  sync.onResyncFailed = (err) => {
+    if (io) io.send({ t: "abort", reason: "state" });
+    toast(nt("resyncFailed", { code: err?.code || "state" }));
+    hangUp();
+  };
+  sync.onUnstable = () => {
+    if (io) io.send({ t: "abort", reason: "unstable" });
+    toast(nt("unstableLink"));
+    hangUp();
+  };
+  sync.attach();
+  // Freeze until the guest has loaded the game and the same savestate.
+  sync.setHold(true);
+  // Native only: a guest that never boots (or never answers a resync) must not leave the host
+  // frozen (NETPLAY.md §7).
+  startup = startupTimeout(!!native, (name) => {
+    io.send({ t: "abort", reason: "timeout" });
+    toast(name === "ready" && sync && sync.resyncs > 0 ? nt("resyncFailed", { code: "timeout" }) : nt("guestStartFailed"));
+    hangUp();
+  });
+  // Library ROMs are stored as Blobs or ArrayBuffers.
+  new Blob([rom])
+    .arrayBuffer()
+    .then((buf) => io.sendBytes({ t: "rom", name: game.name, file: game.file, core: game.core }, new Uint8Array(buf)))
+    .then(() => startup && startup.expect("booted"));
+}
+
+function guestLeft() {
+  if (document.body.classList.contains("linked")) toast(t("p2Left"));
+  hangUp();
+}
+
+// The guest connected over the PairInbox TCP channel (NETPLAY.md §12): no WebRTC for this pair.
+// A channel that comes after the link is up (e.g. WebRTC won) is closed.
+function tcpUp(ch, e, native) {
+  if (io || !pc) return ch.close();
+  link = ch;
+  ch.onclose = guestLeft;
+  if (rtc) rtc.onopen = rtc.onclose = null;
+  rtc = null;
+  pc.onconnectionstatechange = null;
+  pc.close();
+  pc = null;
+  linkUp(ch, e, native);
+}
+
 async function start() {
   const e = emulator();
   const native = nativeSession();
@@ -154,6 +255,17 @@ async function start() {
   inbox = await listenForAnswer((ufrag, code) => {
     if (pc && pc.localDescription && ufrag === iceUfrag(pc.localDescription.sdp)) accept(code);
   });
+  // Native host whose PairInbox can take a channel: the invite says so (peer tcp flag) and a native
+  // guest connects over TCP with the offer's ICE ufrag as the token. The listener stays until hangUp.
+  // (An EJS host never gets one: guests only try TCP with a native host, tcp-channel.js shouldTryTcp.)
+  if (native && inbox && inbox.info && hasChannels()) {
+    tcpAccept = await acceptChannel({
+      plugin: pairInbox(),
+      token: () => (pc && pc.localDescription ? iceUfrag(pc.localDescription.sdp) : ""),
+      onOpen: (ch) => tcpUp(ch, e, native),
+    }).catch(() => null);
+    if (tcpAccept) myPeer.tcp = true;
+  }
   status.textContent = t("cameraOpening");
   // Camera first, even when nothing is scanned here: while it runs, iOS and Android let WebRTC use
   // the phone's LAN address, and without that the phones never connect. It stays on (hidden when
@@ -167,79 +279,9 @@ async function start() {
 
   pc = createPeer();
   const channel = pc.createDataChannel("link", { ordered: true });
-  channel.onopen = () => {
-    stopInbox();
-    closePanel();
-    document.body.classList.add("linked");
-    toast(t("p2Connected"));
-    const { game, rom } = currentGame();
-    io = channelIO(
-      channel,
-      (msg, bytes) => {
-        if (!sync) return; // a late message after hangUp
-        if (msg.t === "booted") {
-          startup.got("booted");
-          // The native lockstep resolves once the state's last chunk is queued; then the guest has
-          // 30 s to answer `ready`. The EJS resync returns nothing and has no timeout.
-          Promise.resolve(sync.resync())
-            .then(() => startup && startup.expect("ready"))
-            .catch(() => {
-              // getStateBase64 or the send failed: don't stay frozen for a ready that cannot come.
-              if (io) io.send({ t: "abort", reason: "state" });
-              toast(nt("guestStartFailed"));
-              hangUp();
-            });
-        } else if (msg.t === "abort") {
-          // The guest could not start the game, or could not load a resync's state (or gave up):
-          // back to single player here.
-          toast(sync.resyncs > 0 ? nt("resyncFailed", { code: msg.reason || "abort" }) : nt("guestStartFailed"));
-          hangUp();
-        } else {
-          if (msg.t === "ready") {
-            startup.got("ready");
-            io.armHeartbeat(); // the game runs on both phones: 5 s of silence now ends the link
-          }
-          sync.onMessage(msg, bytes);
-        }
-      },
-      { native: !!native, onLost: lost },
-    );
-    sync = createLockstep(e, io, true, (waiting) => waiting && toast(t("waitingP2")));
-    // Native only (N1-b, lockstep-native.js): a checksum mismatch resends the state with the next
-    // epoch; the guest then has 30 s to answer `ready`, as at game start. A state that cannot be
-    // taken or sent, or a fourth resync within a minute, ends the link (the guest gets `abort`).
-    sync.onResyncSent = () => startup && startup.expect("ready");
-    sync.onResynced = () => toast(nt("resynced")); // the guest answered ready: both phones run again
-    sync.onResyncFailed = (err) => {
-      if (io) io.send({ t: "abort", reason: "state" });
-      toast(nt("resyncFailed", { code: err?.code || "state" }));
-      hangUp();
-    };
-    sync.onUnstable = () => {
-      if (io) io.send({ t: "abort", reason: "unstable" });
-      toast(nt("unstableLink"));
-      hangUp();
-    };
-    sync.attach();
-    // Freeze until the guest has loaded the game and the same savestate.
-    sync.setHold(true);
-    // Native only: a guest that never boots (or never answers a resync) must not leave the host
-    // frozen (NETPLAY.md §7).
-    startup = startupTimeout(!!native, (name) => {
-      io.send({ t: "abort", reason: "timeout" });
-      toast(name === "ready" && sync && sync.resyncs > 0 ? nt("resyncFailed", { code: "timeout" }) : nt("guestStartFailed"));
-      hangUp();
-    });
-    // Library ROMs are stored as Blobs or ArrayBuffers.
-    new Blob([rom])
-      .arrayBuffer()
-      .then((buf) => io.sendBytes({ t: "rom", name: game.name, file: game.file, core: game.core }, new Uint8Array(buf)))
-      .then(() => startup && startup.expect("booted"));
-  };
-  channel.onclose = () => {
-    if (document.body.classList.contains("linked")) toast(t("p2Left"));
-    hangUp();
-  };
+  rtc = channel;
+  channel.onopen = () => linkUp(channel, e, native);
+  channel.onclose = guestLeft;
   pc.onconnectionstatechange = () => {
     if (pc && pc.connectionState === "failed") {
       connectFailed();

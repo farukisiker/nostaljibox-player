@@ -59,7 +59,8 @@ export function rankCandidates(cands, lanIps = []) {
 
 // One attempt failed because nothing answered (PairInbox "timeout"): the iOS Local Network prompt
 // may have been on screen, or the address was dead. Anything else was a real refusal.
-const isTimeout = (e) => /timeout|timed out/i.test(e?.message ?? e?.code ?? String(e ?? ""));
+// Also used by the TCP channel's connect rounds (opus-5-5/js/tcp-channel.js).
+export const isTimeout = (e) => /timeout|timed out/i.test(e?.message ?? e?.code ?? String(e ?? ""));
 
 // Every address at once; resolves null on the first success, else the list of failures.
 function raceSends(ips, send) {
@@ -101,6 +102,14 @@ export async function sendToInbox({ ips, send, rounds = 2, onRound = null }) {
     if (!failures.every(isTimeout)) return false;
   }
   return false;
+}
+
+// One line from the host's inbox: "<host ICE ufrag> <answer code>" → { ufrag, code }, else null.
+// A "NB-CH1 <token>" channel request (NETPLAY.md §12) that reached an older host's inbox is not an
+// answer and is ignored (a new guest only sends it to a host whose invite has the tcp flag).
+export function parseInboxLine(text) {
+  const [ufrag, code] = String(text ?? "").split(" ");
+  return code && (code.startsWith("NB1:") || /^NB[23]:/i.test(code)) ? { ufrag, code } : null;
 }
 
 /**
