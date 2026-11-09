@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Netplay texts, English and Turkish only for now. N1-d moves these keys into shared/locales/*.json
-// (13 languages); keep the key names when doing so.
+// Netplay and native-player texts in the app's 13 languages (the codes of shared/locales/*.json).
+// They live here, not in shared/locales, because that folder is MIT and belongs to the library;
+// the language is chosen by lang.js with the same rule as shared/i18n.js. Any language without a
+// text falls back to English. Placeholders are {name}, as in shared/i18n.js t().
+import { pickLang, fill } from "./lang.js";
+export { pickLang, APP_LANGS } from "./lang.js";
+
 const TABLE = {
   en: {
     peerMismatch: "Two-phone play needs the same version of the NostaljiBox iPhone app on both phones (you: {mine}, other phone: {theirs}).",
@@ -13,6 +18,7 @@ const TABLE = {
     resyncFailed: "The phones could not be re-synced ({code})",
     backendEjs: "classic player",
     backendOld: "older version",
+    pausedHint: "Paused — tap to resume",
   },
   tr: {
     peerMismatch: "İki telefonlu oyun için iki telefon da aynı sürüm NostaljiBox iPhone uygulamasını kullanmalı (sende {mine}, karşıda {theirs}).",
@@ -25,28 +31,140 @@ const TABLE = {
     resyncFailed: "Telefonlar yeniden eşitlenemedi ({code})",
     backendEjs: "klasik oynatıcı",
     backendOld: "eski sürüm",
+    pausedHint: "Duraklatıldı — devam etmek için dokun",
+  },
+  de: {
+    peerMismatch: "Für das Spiel mit zwei Handys muss auf beiden dieselbe Version der NostaljiBox-iPhone-App laufen (du: {mine}, anderes Handy: {theirs}).",
+    guestOutdated: "Die App auf dem anderen Handy ist veraltet; aktualisiere beide Apps.",
+    connectionLost: "Verbindung verloren",
+    guestStartFailed: "Das Spiel konnte auf dem anderen Handy nicht starten",
+    guestBootFailed: "Das Spiel konnte auf diesem Handy nicht geöffnet werden ({code})",
+    startTimeout: "Das andere Handy hat das Spiel nicht rechtzeitig gestartet",
+    backendEjs: "klassischer Player",
+    backendOld: "ältere Version",
+    pausedHint: "Pausiert — zum Fortsetzen tippen",
+  },
+  es: {
+    peerMismatch: "Para jugar con dos teléfonos, ambos necesitan la misma versión de la app NostaljiBox para iPhone (tú: {mine}, otro teléfono: {theirs}).",
+    guestOutdated: "La app del otro teléfono está desactualizada; actualiza ambas apps.",
+    connectionLost: "Conexión perdida",
+    guestStartFailed: "El juego no pudo iniciarse en el otro teléfono",
+    guestBootFailed: "El juego no pudo abrirse en este teléfono ({code})",
+    startTimeout: "El otro teléfono no inició el juego a tiempo",
+    backendEjs: "reproductor clásico",
+    backendOld: "versión anterior",
+    pausedHint: "En pausa — toca para continuar",
+  },
+  fr: {
+    peerMismatch: "Le jeu à deux téléphones nécessite la même version de l'app NostaljiBox pour iPhone sur les deux (toi : {mine}, autre téléphone : {theirs}).",
+    guestOutdated: "L'app de l'autre téléphone n'est pas à jour ; mets à jour les deux apps.",
+    connectionLost: "Connexion perdue",
+    guestStartFailed: "Le jeu n'a pas pu démarrer sur l'autre téléphone",
+    guestBootFailed: "Le jeu n'a pas pu s'ouvrir sur ce téléphone ({code})",
+    startTimeout: "L'autre téléphone n'a pas lancé le jeu à temps",
+    backendEjs: "lecteur classique",
+    backendOld: "ancienne version",
+    pausedHint: "En pause — touche pour reprendre",
+  },
+  hi: {
+    peerMismatch: "दो फ़ोन से खेलने के लिए दोनों फ़ोन पर NostaljiBox iPhone ऐप का एक ही वर्शन होना चाहिए (आप: {mine}, दूसरा फ़ोन: {theirs})।",
+    guestOutdated: "दूसरे फ़ोन का ऐप पुराना है; दोनों ऐप अपडेट करें।",
+    connectionLost: "कनेक्शन टूट गया",
+    guestStartFailed: "दूसरे फ़ोन पर गेम शुरू नहीं हो सका",
+    guestBootFailed: "इस फ़ोन पर गेम खुल नहीं सका ({code})",
+    startTimeout: "दूसरे फ़ोन ने समय पर गेम शुरू नहीं किया",
+    backendEjs: "क्लासिक प्लेयर",
+    backendOld: "पुराना वर्शन",
+    pausedHint: "रुका हुआ — जारी रखने के लिए टैप करें",
+  },
+  id: {
+    peerMismatch: "Main dua HP butuh versi aplikasi NostaljiBox iPhone yang sama di kedua HP (kamu: {mine}, HP lain: {theirs}).",
+    guestOutdated: "Aplikasi di HP lain sudah lama; perbarui kedua aplikasi.",
+    connectionLost: "Koneksi terputus",
+    guestStartFailed: "Game tidak bisa dimulai di HP lain",
+    guestBootFailed: "Game tidak bisa dibuka di HP ini ({code})",
+    startTimeout: "HP lain tidak memulai game tepat waktu",
+    backendEjs: "pemutar klasik",
+    backendOld: "versi lama",
+    pausedHint: "Dijeda — ketuk untuk melanjutkan",
+  },
+  it: {
+    peerMismatch: "Per giocare con due telefoni serve la stessa versione dell'app NostaljiBox per iPhone su entrambi (tu: {mine}, altro telefono: {theirs}).",
+    guestOutdated: "L'app sull'altro telefono non è aggiornata; aggiorna entrambe le app.",
+    connectionLost: "Connessione persa",
+    guestStartFailed: "Il gioco non è partito sull'altro telefono",
+    guestBootFailed: "Il gioco non si è aperto su questo telefono ({code})",
+    startTimeout: "L'altro telefono non ha avviato il gioco in tempo",
+    backendEjs: "player classico",
+    backendOld: "versione precedente",
+    pausedHint: "In pausa — tocca per riprendere",
+  },
+  ja: {
+    peerMismatch: "2台のスマホで遊ぶには、両方に同じバージョンの NostaljiBox iPhone アプリが必要です（あなた: {mine}、相手のスマホ: {theirs}）。",
+    guestOutdated: "相手のスマホのアプリが古いです。両方のアプリをアップデートしてください。",
+    connectionLost: "接続が切れました",
+    guestStartFailed: "相手のスマホでゲームを開始できませんでした",
+    guestBootFailed: "このスマホでゲームを開けませんでした（{code}）",
+    startTimeout: "相手のスマホが時間内にゲームを開始しませんでした",
+    backendEjs: "クラシックプレイヤー",
+    backendOld: "古いバージョン",
+    pausedHint: "一時停止中 — タップで再開",
+  },
+  ko: {
+    peerMismatch: "두 폰으로 플레이하려면 두 폰 모두 같은 버전의 NostaljiBox iPhone 앱이 필요해요 (나: {mine}, 상대 폰: {theirs}).",
+    guestOutdated: "상대 폰의 앱이 오래됐어요. 두 앱 모두 업데이트하세요.",
+    connectionLost: "연결이 끊겼어요",
+    guestStartFailed: "상대 폰에서 게임을 시작하지 못했어요",
+    guestBootFailed: "이 폰에서 게임을 열지 못했어요 ({code})",
+    startTimeout: "상대 폰이 제때 게임을 시작하지 않았어요",
+    backendEjs: "클래식 플레이어",
+    backendOld: "이전 버전",
+    pausedHint: "일시정지 — 탭하여 계속",
+  },
+  pt: {
+    peerMismatch: "Para jogar com dois celulares, os dois precisam da mesma versão do app NostaljiBox para iPhone (você: {mine}, outro celular: {theirs}).",
+    guestOutdated: "O app do outro celular está desatualizado; atualize os dois apps.",
+    connectionLost: "Conexão perdida",
+    guestStartFailed: "O jogo não conseguiu iniciar no outro celular",
+    guestBootFailed: "O jogo não conseguiu abrir neste celular ({code})",
+    startTimeout: "O outro celular não iniciou o jogo a tempo",
+    backendEjs: "player clássico",
+    backendOld: "versão antiga",
+    pausedHint: "Pausado — toque para continuar",
+  },
+  ru: {
+    peerMismatch: "Для игры на двух телефонах на обоих нужна одна и та же версия приложения NostaljiBox для iPhone (у вас: {mine}, на другом телефоне: {theirs}).",
+    guestOutdated: "Приложение на другом телефоне устарело; обновите оба приложения.",
+    connectionLost: "Связь потеряна",
+    guestStartFailed: "Игра не запустилась на другом телефоне",
+    guestBootFailed: "Игра не открылась на этом телефоне ({code})",
+    startTimeout: "Другой телефон не запустил игру вовремя",
+    backendEjs: "классический плеер",
+    backendOld: "старая версия",
+    pausedHint: "Пауза — нажмите, чтобы продолжить",
+  },
+  zh: {
+    peerMismatch: "两部手机一起玩需要两部手机都安装相同版本的 NostaljiBox iPhone 应用（你：{mine}，另一部手机：{theirs}）。",
+    guestOutdated: "另一部手机的应用版本过旧；请更新两部手机的应用。",
+    connectionLost: "连接已断开",
+    guestStartFailed: "另一部手机上无法启动游戏",
+    guestBootFailed: "这部手机上无法打开游戏（{code}）",
+    startTimeout: "另一部手机未及时启动游戏",
+    backendEjs: "经典播放器",
+    backendOld: "旧版本",
+    pausedHint: "已暂停 — 点按继续",
   },
 };
 
-// Same choice as shared/i18n.js: the library's saved language, else the phone's, else English.
-export function pickLang(win = globalThis) {
-  try {
-    const saved = win.localStorage?.getItem("lang");
-    if (saved && TABLE[saved]) return saved;
-  } catch {
-    // storage blocked
-  }
-  const tags = win.navigator?.languages || [win.navigator?.language];
-  for (const tag of tags || []) {
-    const base = String(tag || "").toLowerCase().split("-")[0];
-    if (TABLE[base]) return base;
-  }
-  return "en";
-}
-
+// nt("peerMismatch", { mine, theirs }) in the chosen language; an unknown key comes back as itself.
 export function nt(key, vars, lang = pickLang()) {
   const text = TABLE[lang]?.[key] ?? TABLE.en[key] ?? key;
-  return vars ? text.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m)) : text;
+  return fill(text, vars);
+}
+
+// All texts of one language (English for an unknown code), for the tests.
+export function textsFor(lang) {
+  return TABLE[lang] ?? TABLE.en;
 }
 
 export const NETPLAY_KEYS = Object.keys(TABLE.en);

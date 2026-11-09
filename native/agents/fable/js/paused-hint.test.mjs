@@ -243,7 +243,7 @@ test("hides on `stopped` and on pagehide", () => {
   assert.equal(h.isShown(), false);
 });
 
-test("language: Turkish phone → TR, saved library language wins, other languages → English", () => {
+test("language: Turkish phone → TR, saved library language wins, unknown languages → English", () => {
   assert.equal(hintLang({ navigator: { language: "tr-TR" } }), "tr");
   assert.equal(hintLang({ navigator: { languages: ["de-DE", "tr"] } }), "de");
   assert.equal(hintLang({ localStorage: { getItem: () => "tr" }, navigator: { language: "en-US" } }), "tr");
@@ -253,8 +253,9 @@ test("language: Turkish phone → TR, saved library language wins, other languag
   assert.equal(hintLang({}), "en");
   assert.equal(hintText("tr"), "Duraklatıldı — devam etmek için dokun");
   assert.equal(hintText("en"), "Paused — tap to resume");
-  assert.equal(hintText("de"), "Paused — tap to resume");
-  assert.equal(hintText("ja"), "Paused — tap to resume");
+  assert.equal(hintText("de"), "Pausiert — zum Fortsetzen tippen");
+  assert.equal(hintText("ja"), "一時停止中 — タップで再開");
+  assert.equal(hintText("xx"), "Paused — tap to resume");
 
   const plugin = hintPlugin();
   const { doc, win, hint } = dom({ lang: "tr-TR" });
@@ -266,7 +267,13 @@ test("language: Turkish phone → TR, saved library language wins, other languag
   const p2 = hintPlugin();
   installPausedHint({ plugin: p2, document: deWin.doc, window: deWin.win });
   p2.emit("state", { state: "paused", reasons: ["interruption"] });
-  assert.equal(deWin.hint().textContent, "Paused — tap to resume");
+  assert.equal(deWin.hint().textContent, "Pausiert — zum Fortsetzen tippen");
+
+  const xxWin = dom({ lang: "xx-YY" });
+  const p3 = hintPlugin();
+  installPausedHint({ plugin: p3, document: xxWin.doc, window: xxWin.win });
+  p3.emit("state", { state: "paused", reasons: ["interruption"] });
+  assert.equal(xxWin.hint().textContent, "Paused — tap to resume");
 });
 
 test("dispose removes the element and every listener", async () => {
