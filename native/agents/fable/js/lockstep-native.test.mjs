@@ -138,8 +138,59 @@ test("checksum: guest forwards its hash, host compares; a mismatch is logged and
   assert.equal(logs.length, 1);
   assert.equal(logs[0][0], "lockstep: DESYNC");
   assert.equal(logs[0][1], 600);
-  assert.equal(h.plugin.calls.length, callsAfterStart); // no state sent, no restart
+  // The only plugin call after the mismatch is the note to the driver: no state sent, no restart.
+  assert.deepEqual(h.plugin.names().slice(callsAfterStart), ["lockstepNoteDesync"]);
   assert.equal(h.sync.hashes.size, 0);
+});
+
+test("desync: host tells the driver with lockstepNoteDesync { epoch, frame } without awaiting it; missing method and rejection are harmless", async () => {
+  const logs = [];
+  const h = host({ log: (...a) => logs.push(a) });
+  await h.sync.resync();
+  h.sync.onMessage({ t: "ready", epoch: 1 });
+  const before = h.plugin.calls.length;
+  // Match: nothing is noted.
+  h.plugin.emit("lockstepChecksum", { epoch: 1, frame: 300, hash: "aa" });
+  h.sync.onMessage(["h", 1, 300, "aa"]);
+  assert.equal(h.plugin.desyncs, 0);
+  assert.equal(h.plugin.calls.length, before);
+  // Mismatch: noted synchronously, with the host's current epoch and the compared frame.
+  h.plugin.emit("lockstepChecksum", { epoch: 1, frame: 600, hash: "aa" });
+  h.sync.onMessage(["h", 1, 600, "bb"]);
+  assert.deepEqual(h.plugin.calls.at(-1), { method: "lockstepNoteDesync", args: { epoch: 1, frame: 600 } });
+  assert.equal(h.plugin.desyncs, 1);
+  assert.equal(h.sync.desyncs, 1);
+  // A second desync at another frame: another note, same epoch.
+  h.sync.onMessage(["h", 1, 900, "x"]);
+  h.plugin.emit("lockstepChecksum", { epoch: 1, frame: 900, hash: "y" });
+  assert.deepEqual(h.plugin.calls.at(-1).args, { epoch: 1, frame: 900 });
+  assert.equal(h.plugin.desyncs, 2);
+
+  // Older plugin without the method: counted and logged in JS, no TypeError.
+  const old = host({ log: quiet });
+  delete old.plugin.lockstepNoteDesync;
+  await old.sync.resync();
+  old.sync.onMessage({ t: "ready", epoch: 1 });
+  const n = old.plugin.calls.length;
+  old.plugin.emit("lockstepChecksum", { epoch: 1, frame: 300, hash: "aa" });
+  old.sync.onMessage(["h", 1, 300, "bb"]);
+  assert.equal(old.sync.desyncs, 1);
+  assert.equal(old.plugin.calls.length, n);
+
+  // A throwing implementation must not break the host's compare path.
+  const bad = host({ log: (...a) => logs.push(a) });
+  bad.plugin.lockstepNoteDesync = () => {
+    throw new Error("boom");
+  };
+  await bad.sync.resync();
+  bad.sync.onMessage({ t: "ready", epoch: 1 });
+  let onDesyncFrame = null;
+  bad.sync.onDesync = (f) => (onDesyncFrame = f);
+  bad.plugin.emit("lockstepChecksum", { epoch: 1, frame: 300, hash: "aa" });
+  bad.sync.onMessage(["h", 1, 300, "bb"]);
+  assert.equal(bad.sync.desyncs, 1);
+  assert.equal(onDesyncFrame, 300);
+  assert.ok(logs.some((l) => l[0] === "lockstep: lockstepNoteDesync failed"));
 });
 
 test("lockstepState → onWait only on change; detach → lockstepStop, listeners removed, wait notice cleared", async () => {

@@ -6,7 +6,8 @@
 // host-link.js / guest-link.js do not care which one the factory handed them.
 //
 // Plugin contract (API.md §9): lockstepStart/Stop/Hold resolve as soon as they are queued, in call
-// order; pushRemoteInputs returns nothing; events lockstepInputs/lockstepChecksum/lockstepState.
+// order; pushRemoteInputs and lockstepNoteDesync (v3.1) return nothing; events
+// lockstepInputs/lockstepChecksum/lockstepState.
 
 export const DEFAULTS = { delay: 4, batch: 2, checkEvery: 300 };
 
@@ -182,6 +183,12 @@ export class LockstepNative {
     if (entry.mine !== entry.theirs) {
       this.desyncs += 1;
       this.log("lockstep: DESYNC", frame, entry.mine, entry.theirs);
+      // API.md §9 v3.1: tell the driver so the native `desyncs` stat and lockstepState agree
+      // with JS. Returns nothing (CAPPluginReturnNone), so it is not awaited; an older plugin
+      // without the method is skipped.
+      if (typeof this.plugin.lockstepNoteDesync === "function") {
+        this.call("lockstepNoteDesync", { epoch: this.epoch, frame });
+      }
       this.onDesync?.(frame);
     }
   }
