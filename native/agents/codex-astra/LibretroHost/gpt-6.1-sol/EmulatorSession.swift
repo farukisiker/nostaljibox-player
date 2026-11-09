@@ -424,6 +424,9 @@ public final class EmulatorSession {
     }
     public func loadState(slot: Int, completion: @escaping (Result<Void, Error>) -> Void) {
         stateOperation(completion) { [self] in
+            guard !lockstep.active, !lockstep.hold else {
+                throw SessionError(code: "busy", message: "Lockstep is active or held")
+            }
             let url = try stateURL(slot: slot)
             let data: Data
             do { data = try Data(contentsOf: url) }

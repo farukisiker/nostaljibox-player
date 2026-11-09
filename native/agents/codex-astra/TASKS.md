@@ -67,3 +67,13 @@ N0-b CI GREEN42597830345 (3m22s). N0-c lead reviewed driver/session/tests; reque
 N0-c checkpoint0721ba1 CI42598399274 GREEN (GitHub page confirms Success; gh hit public API rate limit). Independent gpt-6-sol review found only previously reported JS/native desync counter gap. N0-d restored reviewed plugin; requesting checkpoint. N0-h scratch tests reviewed with corrections (buffer pointer lifetimes, held input probe, SRAM variant when present); waiting d checkpoint before copy.
 N0-c log retrieved via nightly.link artifact13664522590:7driver tests pass,36Codex tests pass,TEST SUCCEEDED. N0-d af17a93 CI42598942075 running. N0-h final review corrections delegated; SNES input sensitivity not assumed from README; CI decides.
 N0-d CI42598942075 failed compile only: CAPPluginCall.options is optional. Terra fixed both call sites to default empty dictionary; requesting correction checkpoint. N0-h complete reviewed scratch preserved pending d build.
+
+## N1 follow-up (2026-11-09 17:58)
+Baseline690c259. N0 ba705b8 desync and Fable determinism/native guest changes green and shipped TestFlight100 per architect; prior pending N0 rows historical. Supafaust has no SYSTEM_RAM, full-state checksum fallback is required. Two-iPhone device test remains external. Build95 frozen.
+| Item | Model | Agent | Files | Status | % | ETA | Resume |
+|---|---|---|---|---|---:|---|---|
+|1 Slot-load busy guard|gpt-6.1-sol|/root/sol_n0|LibretroHost/gpt-6.1-sol/EmulatorSession.swift|implementing|30|18:02|followup_task|
+|2 ba705b8 review|gpt-6-sol|/root/sol6_n0_bridge|read-only|reviewing|30|18:02|followup_task|
+|3 Identity headers|gpt-6.1-sol|/root/sol_n0|LibretroHost/gpt-6.1-sol/, Tests/gpt-6.1-sol/|queued|0|18:15|followup_task|
+|4 Route ordering|gpt-6.1-sol|/root/sol_n0|same model folders|queued|0|18:20|followup_task|
+|5 Paused hint|gpt-6.1-terra|pending|js/gpt-6.1-terra/ + owner hook requested|queued|0|18:25|pending|
