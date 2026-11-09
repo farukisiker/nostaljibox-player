@@ -77,3 +77,4 @@ Baseline690c259. N0 ba705b8 desync and Fable determinism/native guest changes gr
 |3 Identity headers|gpt-6.1-sol|/root/sol_n0|LibretroHost/gpt-6.1-sol/, Tests/gpt-6.1-sol/|queued|0|18:15|followup_task|
 |4 Route ordering|gpt-6.1-sol|/root/sol_n0|same model folders|queued|0|18:20|followup_task|
 |5 Paused hint|gpt-6.1-terra|pending|js/gpt-6.1-terra/ + owner hook requested|queued|0|18:25|pending|
+N1 item1 checkpoint747a48b reviewed; CI pending. Item2 review gpt-6-sol /root/sol6_n0_bridge AGREES ba705b8, no concrete bug: active epoch/past checksum boundary/dedup correct, FIFO one-way bridge and stats/events wired; existing tests cover rejected/duplicate/reset reports. No code change needed. Item3 SOL implementing headers,30%,ETA18:08. Item5 Terra planning read-only until earlier checkpoints.
