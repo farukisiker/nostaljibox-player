@@ -178,3 +178,17 @@ test("guestBackend gates: native only on iOS with the plugin, nb_native not off,
   // A guest on the web (no Capacitor) pairing with an old host: still EJS, no block needed.
   assert.deepEqual(await guestBackend(null, { canBootNative: true, win: { location: { search: "" } } }), ejs({ system: "" }));
 });
+
+test("guestBackend follows the host: an EJS or old host gets an EJS guest even on a native-capable iPhone (iPhone + Android host works as today)", async () => {
+  const asked = fakePlugin();
+  asked.isAvailable = () => ((asked.asked = true), Promise.resolve({ available: true, version: "642d1d1", appVersion: "1.4.0+96" }));
+  const win = iosWindow({ plugin: asked });
+  assert.deepEqual(await guestBackend(ejs(), { canBootNative: true, win }), ejs());
+  assert.deepEqual(await guestBackend(null, { canBootNative: true, win }), ejs({ system: "" }));
+  assert.equal(asked.asked, undefined); // the plugin is not even consulted
+  assert.equal(pairingProblem(ejs(), ejs()), null);
+  assert.equal(pairingProblem(ejs({ system: "" }), null), null);
+  // Only a native host is answered natively, and refused when this phone cannot play natively.
+  assert.deepEqual(await guestBackend(native(), { canBootNative: true, win }), native());
+  assert.equal(pairingProblem(await guestBackend(native(), { canBootNative: false, win }), native()), "mismatch");
+});

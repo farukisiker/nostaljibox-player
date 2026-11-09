@@ -149,7 +149,14 @@ async function start() {
           startup.got("booted");
           // The native lockstep resolves once the state's last chunk is queued; then the guest has
           // 30 s to answer `ready`. The EJS resync returns nothing and has no timeout.
-          Promise.resolve(sync.resync()).then(() => startup && startup.expect("ready"));
+          Promise.resolve(sync.resync())
+            .then(() => startup && startup.expect("ready"))
+            .catch(() => {
+              // getStateBase64 or the send failed: don't stay frozen for a ready that cannot come.
+              if (io) io.send({ t: "abort", reason: "state" });
+              toast(nt("guestStartFailed"));
+              hangUp();
+            });
         } else if (msg.t === "abort") {
           // The guest could not start the game (or gave up): back to single player here.
           toast(nt("guestStartFailed"));

@@ -2,7 +2,7 @@
 // Run with: node --test native/agents/fable/js/
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHeartbeat, HB_INTERVAL_MS } from "./heartbeat.js";
+import { createHeartbeat, HB_INTERVAL_MS, HB_ARMED_LIMIT_MS, HB_ARMED_EJS_MS } from "./heartbeat.js";
 import { fakeTimers } from "./fake-plugin.mjs";
 import { channelIO } from "../../../../src/lockstep.js";
 
@@ -55,8 +55,8 @@ test("hb received but game not started: 30 s ends the link on the native backend
   assert.equal(ejs.hb.active, true);
 });
 
-test("armed + first hb: 5 s of silence → onLost once; any message resets the clock", () => {
-  const { timers, hb, lost } = make({ native: false });
+test("armed + first hb: 5 s of silence → onLost once; any message resets the clock (native pair)", () => {
+  const { timers, hb, lost } = make({ native: true });
   hb.arm();
   timers.advance(10000); // armed but no hb from the peer yet: nothing
   assert.equal(lost(), 0);
@@ -68,6 +68,18 @@ test("armed + first hb: 5 s of silence → onLost once; any message resets the c
   timers.advance(2000); // the tick at 20 s sees 6 s of silence
   assert.equal(lost(), 1);
   timers.advance(10000);
+  assert.equal(lost(), 1);
+});
+
+test("EJS pair, armed: 30 s of silence, not 5 (§10.4 open; today they waited for ever)", () => {
+  const { timers, hb, lost } = make({ native: false });
+  hb.arm();
+  hb.seen(true);
+  assert.equal(hb.limitMs, HB_ARMED_EJS_MS);
+  assert.equal(HB_ARMED_LIMIT_MS, 5000);
+  timers.advance(29000);
+  assert.equal(lost(), 0);
+  timers.advance(2000);
   assert.equal(lost(), 1);
 });
 

@@ -82,11 +82,14 @@ export function describePeer(peer, words = {}) {
 // The guest's own backend for the host's invite (NETPLAY.md §1.1 / R2-3): `window.nbNative` is not
 // set yet at `?join`, so the native player's gates are applied directly: iOS, `nb_native` not "off",
 // no `?ejs`, `isAvailable({ system })`. `canBootNative` is whether the page can start a native guest
-// session at all (N0-f hook); without it the guest is an EJS peer, exactly as today. Never throws.
+// session at all (N0-f hook); without it the guest is an EJS peer, exactly as today. An EJS or old
+// host gets an EJS guest too (an iPhone joining an Android host keeps working as today); only a
+// native host is answered natively, and refused when this phone cannot. Never throws.
 export async function guestBackend(peer, { canBootNative = false, win = globalThis.window, params } = {}) {
   const system = peer?.system || "";
   const ejs = { backend: BACKEND_EJS, system, coreVersion: "", appVersion: "" };
   try {
+    if (!peer || peer.backend !== BACKEND_NATIVE) return ejs;
     if (!canBootNative || !win) return ejs;
     const cap = win.Capacitor;
     if (!cap || cap.getPlatform?.() !== "ios") return ejs;

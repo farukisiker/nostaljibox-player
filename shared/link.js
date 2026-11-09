@@ -222,8 +222,9 @@ export async function decodeDescription(code) {
     return { type: f.type, sdp: buildSdp(f), inbox: f.inbox, ufrag: f.ufrag, peer: f.peer };
   }
   if (!code.startsWith(PREFIX)) throw new Error(t("notACode"));
-  const { t, s, p } = JSON.parse(await inflate(code.slice(PREFIX.length)));
-  return { type: t, sdp: s, peer: peerFromLong(p) };
+  // `type`, not `t`: that name is the imported translator used above (TDZ error otherwise).
+  const { t: type, s, p } = JSON.parse(await inflate(code.slice(PREFIX.length)));
+  return { type, sdp: s, peer: peerFromLong(p) };
 }
 
 const isCode = (text) => text.startsWith(PREFIX) || /^NB[23]:/i.test(text);

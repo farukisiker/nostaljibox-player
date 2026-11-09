@@ -12,6 +12,7 @@ import { t } from "../shared/i18n.js";
 import { guestBackend, pairingProblem, describePeer, BACKEND_NATIVE } from "../native/agents/fable/js/peer-block.js";
 import { startupTimeout } from "../native/agents/fable/js/startup-timeout.js";
 import { nt } from "../native/agents/fable/js/strings.js";
+import { once, latch } from "../native/agents/fable/js/guards.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -40,14 +41,15 @@ export function setupGuestLink(boot, hooks = {}) {
   }
 
   // Every end of the link: lockstep off (native: lockstepStop), timers off, then the library.
-  function end(msg) {
+  // Once only: onLost, onclose and ICE "failed" can all fire for the same lost link.
+  const end = once((msg) => {
     if (sync) sync.detach();
     sync = null;
     if (startup) startup.clear();
     if (io) io.close();
     if (!native && window.EJS_emulator && window.EJS_emulator.pause) window.EJS_emulator.pause();
     leave(msg);
-  }
+  });
 
   // This phone could not start or keep the game: tell the host, then go back.
   function abort(reason, msg) {
@@ -69,6 +71,8 @@ export function setupGuestLink(boot, hooks = {}) {
           const started = (target) => {
             startup.got("started");
             sync = createLockstep(target, io, false, (waiting) => waiting && toast(t("waitingHost")));
+            // Native: a state the core rejects ends it now, not after the host's 30 s timeout.
+            sync.onLoadFailed = () => abort("load", nt("guestBootFailed", { code: "load" }));
             sync.attach();
             sync.setHold(true);
             io.send({ t: "booted" });
@@ -100,8 +104,11 @@ export function setupGuestLink(boot, hooks = {}) {
     channel.onclose = () => end(t("hostLeft"));
   }
 
+  // One offer at a time: the latch is taken before the first await, so a repeated scan or link
+  // while this one is still being decoded cannot open a second connection.
+  const offering = latch();
   async function onOffer(code) {
-    if (pc) return;
+    if (pc || !offering.take()) return;
     if (stopScan) stopScan();
     try {
       const offer = await decodeDescription(code);
@@ -114,6 +121,7 @@ export function setupGuestLink(boot, hooks = {}) {
         stopCamera(camera);
         $("#join-scan").classList.add("hidden");
         status.textContent = nt("peerMismatch", { mine: describePeer(myPeer, words), theirs: describePeer(offer.peer, words) });
+        offering.release(); // a pasted invite from a matching phone may still follow
         return; // #back ("Back to library") stays on screen
       }
       status.textContent = t("preparingConnection");
@@ -155,6 +163,7 @@ export function setupGuestLink(boot, hooks = {}) {
     } catch (e) {
       status.textContent = e.message || String(e);
       pc = null;
+      offering.release();
     }
   }
 
