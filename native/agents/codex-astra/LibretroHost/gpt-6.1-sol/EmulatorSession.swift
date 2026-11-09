@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import LibretroC
 
@@ -24,6 +25,10 @@ public final class EmulatorSession {
     private var savedRAM: Data?
     private var pauses = PauseCoordinator()
     private var producing = false
+    private var started = false
+    /// The last start attempt failed on the audio engine; the "interruption" reason it added is
+    /// cleared (and the start retried) on the next pause/resume transition.
+    private var audioRetry = false
     private var statsVisible = false
     private var frame: UInt64 = 0
     private var fps = 0.0
@@ -31,6 +36,7 @@ public final class EmulatorSession {
     private var sampleTime = 0.0
     private var saveTime = 0.0
     private var geometry: [String: Any] = [:]
+    private var interruptionObserver: NSObjectProtocol?
 
     public init() {
         let ready = DispatchSemaphore(value: 0)
@@ -46,6 +52,7 @@ public final class EmulatorSession {
         }
         thread.name = "NostaljiBox.libretro"
         thread.qualityOfService = .userInteractive
+        thread.stackSize = 8 << 20 // Mednafen cores keep large frame/sound arrays on the stack
         thread.start()
         ready.wait()
         loop = captured
@@ -104,15 +111,20 @@ public final class EmulatorSession {
                 guard let ring = nb_bridge_audio_ring() else { throw SessionError(code: "audio", message: "Missing audio ring") }
                 do { audio = try AudioOutput(ring: ring, sampleRate: av.timing.sample_rate) }
                 catch { throw SessionError(code: "audio", message: error.localizedDescription) }
+                audio?.onConfigurationChange = { [weak self] in self?.handleConfigurationChange() }
+                observeInterruptions()
                 frame = 0; fps = 0; sampleFrames = 0
                 sampleTime = ProcessInfo.processInfo.systemUptime; saveTime = sampleTime
                 clock = FrameClock(fps: rate) { [weak self] count in self?.tick(count) }
-                pauses.begin()
-                try reevaluate()
+                // Seed geometry from av info so the first renderFrame only emits a real change.
+                geometry = ["width": Int(av.geometry.base_width), "height": Int(av.geometry.base_height), "aspect": aspect()]
                 let result: [String: Any] = ["width": Int(av.geometry.base_width), "height": Int(av.geometry.base_height),
                     "maxWidth": Int(av.geometry.max_width), "maxHeight": Int(av.geometry.max_height),
                     "fps": rate, "sampleRate": av.timing.sample_rate, "aspect": aspect()]
-                emit("started", result)
+                started = true
+                emit("started", result) // before the first "state"/"geometry"
+                pauses.begin()
+                updateRunning() // an audio start failure here pauses instead of failing the start
                 main { completion(.success(result)) }
             } catch {
                 let failure = Self.error(error)
@@ -127,7 +139,9 @@ public final class EmulatorSession {
         enqueue { [self] in let saved = teardown(reason: reason); main { completion(saved) } }
     }
     @discardableResult private func teardown(reason: String) -> Bool {
-        let existed = core != nil || audio != nil || renderer != nil
+        let existed = started
+        started = false; audioRetry = false
+        if let observer = interruptionObserver { NotificationCenter.default.removeObserver(observer); interruptionObserver = nil }
         clock?.stop(); clock = nil; producing = false; fps = 0
         audio?.stop(); audio = nil // detach source and destroy renderer before bridge frees its ring
         renderer?.shutdown(); renderer = nil
@@ -141,17 +155,28 @@ public final class EmulatorSession {
     }
     public func pause(completion: @escaping () -> Void = {}) { setPauseReason("user", active: true, completion: completion) }
     public func resume(completion: @escaping () -> Void = {}) {
-        enqueue { [self] in pauses.resume(); updateRunning(); main(completion) }
+        enqueue { [self] in transition { pauses.resume() }; main(completion) }
     }
     public func setPauseReason(_ reason: String, active: Bool, completion: @escaping () -> Void = {}) {
-        enqueue { [self] in pauses.set(reason, active: active); updateRunning(); main(completion) }
+        enqueue { [self] in transition { pauses.set(reason, active: active) }; main(completion) }
+    }
+    /// Every pause/resume change goes through here so a failed audio start is retried once the
+    /// reasons change again (the "interruption" it added is removed before the change applies).
+    private func transition(_ change: () -> Void) {
+        if audioRetry { audioRetry = false; pauses.set("interruption", active: false) }
+        change()
+        updateRunning()
     }
     private func updateRunning() {
         do { try reevaluate() }
         catch {
-            let failure = SessionError(code: "audio", message: error.localizedDescription)
-            _ = teardown(reason: "error")
-            report(failure)
+            // The core and session survive; only the engine failed (session not active, route
+            // busy...). Stay paused under "interruption" and retry on the next transition. No
+            // "error" event: JS treats every error as fatal and falls back to EmulatorJS.
+            audioRetry = true
+            pauses.set("interruption", active: true)
+            producing = false
+            if pauses.active { emit("state", ["state": "paused", "reasons": pauses.reasons.sorted()]) }
         }
     }
     private func reevaluate() throws {
@@ -172,6 +197,42 @@ public final class EmulatorSession {
         })
         if pauses.active { emit("state", ["state": producing ? "running" : "paused", "reasons": pauses.reasons.sorted()]) }
     }
+
+    // MARK: Audio session events (PLAN §1.5). Notifications arrive on arbitrary threads; all
+    // state changes are enqueued onto the core RunLoop.
+    private func observeInterruptions() {
+        if let observer = interruptionObserver { NotificationCenter.default.removeObserver(observer) }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(), queue: nil) { [weak self] note in
+            guard let self = self, let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            switch type {
+            case .began:
+                self.setPauseReason("interruption", active: true)
+            case .ended:
+                let options = AVAudioSession.InterruptionOptions(
+                    rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+                self.enqueue { [self] in
+                    guard started else { return }
+                    transition {
+                        pauses.set("interruption", active: false)
+                        // The interruption is over, but the game only resumes by itself when iOS says so.
+                        if !options.contains(.shouldResume) { pauses.set("user", active: true) }
+                    }
+                }
+            @unknown default: break
+            }
+        }
+    }
+    private func handleConfigurationChange() {
+        enqueue { [self] in
+            guard started, let audio = audio else { return }
+            transition { pauses.set("configChange", active: true) } // stops the clock and engine
+            do { try audio.reconnect() } catch { report(SessionError(code: "audio", message: error.localizedDescription)) }
+            transition { pauses.set("configChange", active: false) } // restarts only if nothing else pauses
+        }
+    }
+
     public func reset(completion: @escaping () -> Void = {}) {
         enqueue { [self] in core?.reset(); main(completion) }
     }
@@ -222,6 +283,7 @@ public final class EmulatorSession {
         catch { report(error); return false }
     }
     deinit {
+        if let observer = interruptionObserver { NotificationCenter.default.removeObserver(observer) }
         let oldCore = core, oldRenderer = renderer, oldClock = clock
         var retiredAudio = audio
         audio = nil; core = nil; renderer = nil; clock = nil
