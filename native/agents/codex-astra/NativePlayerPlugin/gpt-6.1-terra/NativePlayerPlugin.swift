@@ -370,7 +370,7 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     }
     @objc func lockstepStart(_ call: CAPPluginCall) {
         let entered = ProcessInfo.processInfo.systemUptime
-        let options = call.options
+        let options = call.options ?? [:]
         guard let role = integer(options["role"]), let epoch = integer(options["epoch"]),
               let applied = masks(options["applied"]), applied.count == 2,
               let delay = options["delay"] == nil ? 4 : integer(options["delay"]),
@@ -404,8 +404,9 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     }
     @objc func pushRemoteInputs(_ call: CAPPluginCall) {
         let entered = ProcessInfo.processInfo.systemUptime
-        guard let epoch = integer(call.options["epoch"]), let from = integer(call.options["from"]),
-              let values = masks(call.options["masks"]), values.count <= Int.max - from else { return }
+        let options = call.options ?? [:]
+        guard let epoch = integer(options["epoch"]), let from = integer(options["from"]),
+              let values = masks(options["masks"]), values.count <= Int.max - from else { return }
         DispatchQueue.main.async {
             self.session?.pushRemoteInputs(epoch: epoch, from: from, masks: values, bridgeEnteredAt: entered)
         }
