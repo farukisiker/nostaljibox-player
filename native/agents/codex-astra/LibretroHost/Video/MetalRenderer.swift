@@ -26,6 +26,9 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     private var stopped = false
     private let scalingLock = NSLock()
     private var scaling = "fit"
+    // Published by the main thread (MTKView delegate) and read by the core thread.
+    private let sizeLock = NSLock()
+    private var publishedDrawableSize = CGSize.zero
 
     public init(view: MTKView) throws {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice(),
@@ -57,7 +60,13 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         descriptor.colorAttachments[0].pixelFormat = view.colorPixelFormat
         pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
         super.init()
+        publishedDrawableSize = view.drawableSize // init runs on main, before the delegate is set
         view.delegate = self
+    }
+
+    private var drawableSize: CGSize {
+        sizeLock.lock(); defer { sizeLock.unlock() }
+        return publishedDrawableSize
     }
 
     public func configure(maxWidth: Int, maxHeight: Int) throws {
@@ -81,6 +90,9 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
     public func render(frame: Frame, aspect: Double) {
         guard !stopped else { return }
+        // Before the first main-thread layout the drawable is 0x0: nothing to present yet.
+        let size = drawableSize
+        guard size.width >= 1, size.height >= 1 else { return }
         pending = (frame, aspect)
         view.draw()
         pending = nil
@@ -145,7 +157,11 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         nextSlot = (nextSlot + 1) % 3
     }
 
-    public func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    public func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        sizeLock.lock()
+        publishedDrawableSize = size
+        sizeLock.unlock()
+    }
 
     public func shutdown() {
         guard !stopped else { return }
