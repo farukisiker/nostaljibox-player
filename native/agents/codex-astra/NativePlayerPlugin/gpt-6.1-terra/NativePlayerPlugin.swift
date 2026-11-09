@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import UIKit
 import WebKit
 import Capacitor
@@ -17,7 +18,7 @@ import NativeZip
 public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "NativePlayerPlugin"
     public let jsName = "NativePlayer"
-    public let pluginMethods: [CAPPluginMethod] = ["isAvailable", "hasRom", "start", "stop", "pause", "resume", "reset", "saveState", "loadState", "listStates", "getStateBase64", "loadStateBase64", "setPadVisible", "setPadEnabled", "setScaling", "setOption", "setStatsVisible", "getStats", "deleteGame"].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
+    public let pluginMethods: [CAPPluginMethod] = ["isAvailable", "hasRom", "start", "stop", "pause", "resume", "reset", "saveState", "loadState", "listStates", "getStateBase64", "loadStateBase64", "setPadVisible", "setPadEnabled", "setScaling", "setOption", "setStatsVisible", "getStats", "deleteGame", "lockstepStart", "lockstepStop", "lockstepHold"].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) } + [CAPPluginMethod(name: "pushRemoteInputs", returnType: CAPPluginReturnNone)]
     private struct CoreEntry: Decodable { let systems: [String]
         let framework: String
         let version: String }
@@ -84,7 +85,8 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         let system = call.getString("system") ?? ""
         let entries = manifest()
         let types = containers
-        io.async { if let item = entries.sorted(by: { $0.key < $1.key }).first(where: { $0.value.systems.contains(system) }), CoreLocator.isLoadable(item.value.framework) { call.resolve(["available": true, "core": item.key, "version": item.value.version, "containers": types]) } else { call.resolve(["available": false, "containers": types]) } }
+        let appVersion = "\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")+\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "")"
+        io.async { if let item = entries.sorted(by: { $0.key < $1.key }).first(where: { $0.value.systems.contains(system) }), CoreLocator.isLoadable(item.value.framework) { call.resolve(["available": true, "core": item.key, "version": item.value.version, "appVersion": appVersion, "containers": types]) } else { call.resolve(["available": false, "appVersion": appVersion, "containers": types]) } }
     }
     @objc func hasRom(_ call: CAPPluginCall) {
         guard let id = call.getString("gameId"), valid(id), let size = call.getInt("size"), size >= 0, let hash = call.getString("hash"), validHash(hash) else { call.resolve(["cached": false])
@@ -102,11 +104,13 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         let scaling = call.getString("scaling") ?? "fit"
         let showPad = call.getBool("showPad") ?? true
         let showStats = call.getBool("showStats") ?? false
+        let persistSRAM = call.getBool("persistSRAM") ?? true
         enqueue { done in
             self.stopCurrent(reason: "user") { _ in
                 guard let id = call.getString("gameId"), self.valid(id), let hash = call.getString("hash"), self.validHash(hash), let rawName = call.getString("romName"), let system = call.getString("system"), let coreName = call.getString("core"), let entry = self.manifest()[coreName], entry.systems.contains(system), let coreURL = CoreLocator.url(for: entry.framework) else { self.fail(call, "core-load", "Invalid game or unavailable core")
                     done()
                     return }
+                if let suppliedVersion = call.getString("coreVersion"), suppliedVersion != entry.version { self.fail(call, "core-load", "Core version mismatch"); done(); return }
                 let name = (rawName.replacingOccurrences(of: "\\", with: "/") as NSString).lastPathComponent
                 guard self.valid(name) else { self.fail(call, "rom-rejected", "Invalid ROM filename")
                     done()
@@ -168,7 +172,7 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
                                 session.setScaling(scaling)
                                 session.setStatsVisible(showStats)
                                 session.setPauseReason("background", active: UIApplication.shared.applicationState != .active)
-                                session.start(coreURL: coreURL, romURL: romURL, romHash: hash, gameId: id, storage: storage, input: input, renderer: renderer) { result in
+                                session.start(coreURL: coreURL, romURL: romURL, romHash: hash, gameId: id, storage: storage, coreVersion: entry.version, persistSRAM: persistSRAM, input: input, renderer: renderer) { result in
                                     switch result {
                                         case .success(let info): call.resolve(info)
                                         case .failure(let error): self.stopCurrent(reason: "error") { _ in let e = error as? SessionError
@@ -306,7 +310,11 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
                 done() } } }
     @objc func resume(_ call: CAPPluginCall) { withSession(call) { session, done in session.resume { call.resolve()
                 done() } } }
-    @objc func reset(_ call: CAPPluginCall) { withSession(call) { session, done in session.reset { call.resolve()
+    @objc func reset(_ call: CAPPluginCall) { withSession(call) { session, done in session.resetChecked { result in
+                switch result {
+                case .success: call.resolve()
+                case .failure(let error): self.rejectStateError(call, error)
+                }
                 done() } } }
     @objc func setPadVisible(_ call: CAPPluginCall) { withSession(call) { _, done in
             #if canImport(NativeInput)
@@ -334,12 +342,74 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func setOption(_ call: CAPPluginCall) { withSession(call) { session, done in guard let key = call.getString("key"), let value = call.getString("value") else { call.reject("Missing option", "internal")
                 done()
                 return }
-            session.setOption(key: key, value: value) { ok in if ok { call.resolve() } else { call.reject("Invalid option", "internal") }
+            session.setOptionChecked(key: key, value: value) { result in
+                switch result {
+                case .success(let ok): if ok { call.resolve() } else { call.reject("Invalid option", "internal") }
+                case .failure(let error): self.rejectStateError(call, error)
+                }
                 done() } } }
     @objc func deleteGame(_ call: CAPPluginCall) { guard let id = call.getString("gameId"), valid(id) else { call.reject("Invalid game ID", "internal")
             return }
         io.async { do { let bytes = try self.store().deleteGame(gameId: id)
                 call.resolve(["removedBytes": bytes]) } catch { call.reject(error.localizedDescription, "internal") } } }
+    // JSON numbers must be integral and representable before converting to Int or UInt16.
+    private func integer(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let value = number.doubleValue
+        guard value.isFinite, value >= 0, value < Double(Int.max), value.rounded(.towardZero) == value else { return nil }
+        return Int(value)
+    }
+    private func masks(_ value: Any?) -> [UInt16]? {
+        guard let values = value as? [Any] else { return nil }
+        var result: [UInt16] = []
+        for value in values {
+            guard let number = integer(value), number <= Int(UInt16.max) else { return nil }
+            result.append(UInt16(number))
+        }
+        return result
+    }
+    @objc func lockstepStart(_ call: CAPPluginCall) {
+        let entered = ProcessInfo.processInfo.systemUptime
+        let options = call.options
+        guard let role = integer(options["role"]), let epoch = integer(options["epoch"]),
+              let applied = masks(options["applied"]), applied.count == 2,
+              let delay = options["delay"] == nil ? 4 : integer(options["delay"]),
+              let batch = options["batch"] == nil ? 2 : integer(options["batch"]),
+              let checkEvery = options["checkEvery"] == nil ? 300 : integer(options["checkEvery"]),
+              let config = try? LockstepConfiguration(role: role, epoch: epoch, applied: applied, delay: delay, batch: batch, checkEvery: checkEvery) else {
+            call.reject("invalid lockstep params", "internal"); return
+        }
+        DispatchQueue.main.async {
+            guard let session = self.session else { call.reject("No active session", "no-session"); return }
+            session.lockstepStart(config, bridgeEnteredAt: entered)
+            call.resolve()
+        }
+    }
+    @objc func lockstepStop(_ call: CAPPluginCall) {
+        let entered = ProcessInfo.processInfo.systemUptime
+        DispatchQueue.main.async {
+            guard let session = self.session else { call.reject("No active session", "no-session"); return }
+            session.lockstepStop(bridgeEnteredAt: entered)
+            call.resolve()
+        }
+    }
+    @objc func lockstepHold(_ call: CAPPluginCall) {
+        let entered = ProcessInfo.processInfo.systemUptime
+        guard let hold = call.getBool("hold") else { call.reject("invalid lockstep params", "internal"); return }
+        DispatchQueue.main.async {
+            guard let session = self.session else { call.reject("No active session", "no-session"); return }
+            session.lockstepHold(hold, bridgeEnteredAt: entered)
+            call.resolve()
+        }
+    }
+    @objc func pushRemoteInputs(_ call: CAPPluginCall) {
+        let entered = ProcessInfo.processInfo.systemUptime
+        guard let epoch = integer(call.options["epoch"]), let from = integer(call.options["from"]),
+              let values = masks(call.options["masks"]), values.count <= Int.max - from else { return }
+        DispatchQueue.main.async {
+            self.session?.pushRemoteInputs(epoch: epoch, from: from, masks: values, bridgeEnteredAt: entered)
+        }
+    }
     private func rejectStateError(_ call: CAPPluginCall, _ error: Error) {
         let failure = error as? SessionError
         call.reject(failure?.message ?? error.localizedDescription, failure?.code ?? "internal")
