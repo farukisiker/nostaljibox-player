@@ -212,12 +212,12 @@ public final class EmulatorSession {
             case .ended:
                 let options = AVAudioSession.InterruptionOptions(
                     rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
-                self.enqueue { [self] in
-                    guard started else { return }
-                    transition {
-                        pauses.set("interruption", active: false)
+                self.enqueue {
+                    guard self.started else { return }
+                    self.transition {
+                        self.pauses.set("interruption", active: false)
                         // The interruption is over, but the game only resumes by itself when iOS says so.
-                        if !options.contains(.shouldResume) { pauses.set("user", active: true) }
+                        if !options.contains(.shouldResume) { self.pauses.set("user", active: true) }
                     }
                 }
             @unknown default: break
