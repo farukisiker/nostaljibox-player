@@ -2,6 +2,24 @@ import XCTest
 @testable import LibretroHost
 
 final class SaveStateTests: XCTestCase {
+    func testCheckedMutationsWithoutSessionRejectOnMain() {
+        let session = EmulatorSession()
+        let done = expectation(description: "checked mutations")
+        done.expectedFulfillmentCount = 2
+        session.resetChecked { result in
+            XCTAssertTrue(Thread.isMainThread)
+            if case .failure(let error) = result { XCTAssertEqual((error as? SessionError)?.code, "no-session") }
+            else { XCTFail("reset must reject without a core") }
+            done.fulfill()
+        }
+        session.setOptionChecked(key: "missing", value: "value") { result in
+            XCTAssertTrue(Thread.isMainThread)
+            if case .failure(let error) = result { XCTAssertEqual((error as? SessionError)?.code, "no-session") }
+            else { XCTFail("setOption must reject without a core") }
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 5)
+    }
     func testTerminationFlushWithoutSessionDoesNotWaitForMainCompletion() {
         let session = EmulatorSession()
         let finished = expectation(description: "termination flush returns on main")

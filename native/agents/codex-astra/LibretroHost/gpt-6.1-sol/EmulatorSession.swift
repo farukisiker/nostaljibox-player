@@ -27,6 +27,10 @@ public final class EmulatorSession {
     private var gameId = ""
     private var savedRAM: Data?
     private var pauses = PauseCoordinator()
+    private var lockstep = LockstepDriver()
+    private var lockstepTicks = 0, lockstepWaitTicks = 0
+    private var bridgeSeconds = 0.0, bridgeCalls = 0
+    private var lockstepWaitPct = 0.0, lockstepBridgeMs = 0.0
     private var producing = false
     private var started = false
     /// The last start attempt failed on the audio engine; the "interruption" reason it added is
@@ -154,6 +158,8 @@ public final class EmulatorSession {
     @discardableResult private func teardown(reason: String) -> Bool {
         let existed = started
         started = false; audioRetry = false
+        lockstep.stop(); lockstepTicks = 0; lockstepWaitTicks = 0
+        bridgeSeconds = 0; bridgeCalls = 0; lockstepWaitPct = 0; lockstepBridgeMs = 0
         if let observer = interruptionObserver { NotificationCenter.default.removeObserver(observer); interruptionObserver = nil }
         if let observer = routeObserver { NotificationCenter.default.removeObserver(observer); routeObserver = nil }
         routeRecovery = RouteRecovery()
@@ -201,7 +207,7 @@ public final class EmulatorSession {
         let policy = pauses
         producing = try policy.reconcile(currentlyRunning: producing, start: { [self] in
             audio?.reset()
-            if let core = core, let ring = nb_bridge_audio_ring() {
+            if lockstep.mayPrefill, let core = core, let ring = nb_bridge_audio_ring() {
                 let target = Int(core.avInfo.timing.sample_rate * 0.064)
                 // A broken core producing no audio must not trap the serial executor.
                 for _ in 0..<32 { if nb_ring_fill(ring) >= target { break }; runFrame() }
@@ -278,7 +284,74 @@ public final class EmulatorSession {
     }
 
     public func reset(completion: @escaping () -> Void = {}) {
-        enqueue { [self] in core?.reset(); main(completion) }
+        resetChecked { _ in completion() }
+    }
+    public func resetChecked(completion: @escaping (Result<Void, Error>) -> Void) {
+        stateOperation(completion) { [self] in
+            guard !lockstep.active else { throw SessionError(code: "busy", message: "Lockstep is active") }
+            core?.reset()
+        }
+    }
+    private func recordBridge(_ entered: TimeInterval) {
+        let elapsed = ProcessInfo.processInfo.systemUptime - entered
+        if elapsed.isFinite, elapsed >= 0 { bridgeSeconds += elapsed; bridgeCalls += 1 }
+    }
+    public func lockstepStart(_ configuration: LockstepConfiguration,
+                              bridgeEnteredAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        enqueue { [self] in
+            recordBridge(bridgeEnteredAt)
+            guard started else { return }
+            lockstep.start(configuration); clock?.resetDebt()
+        }
+    }
+    public func lockstepStop(bridgeEnteredAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        enqueue { [self] in
+            recordBridge(bridgeEnteredAt); lockstep.stop()
+            buttons[0] = 0; buttons[1] = 0; clock?.resetDebt()
+        }
+    }
+    public func lockstepHold(_ hold: Bool,
+                             bridgeEnteredAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        enqueue { [self] in
+            recordBridge(bridgeEnteredAt); lockstep.setHold(hold); clock?.resetDebt()
+        }
+    }
+    public func pushRemoteInputs(epoch: Int, from: Int, masks: [UInt16],
+                                 bridgeEnteredAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        enqueue { [self] in
+            recordBridge(bridgeEnteredAt)
+            let wasStalled = lockstep.stalled
+            lockstep.push(epoch: epoch, from: from, masks: masks)
+            if wasStalled, producing, !lockstep.hold {
+                let before = ProcessInfo.processInfo.systemUptime
+                let ran = advanceLockstep(2)
+                let after = ProcessInfo.processInfo.systemUptime
+                if ran > 0 {
+                    tickStats.recordRun(seconds: after - before, frames: ran)
+                    renderFrame()
+                    tickStats.recordUpload(seconds: ProcessInfo.processInfo.systemUptime - after)
+                }
+            }
+        }
+    }
+    private func checksum() -> String {
+        let bytes: Data
+        if let memory = nb_bridge_memory_data(UInt32(RETRO_MEMORY_SYSTEM_RAM)),
+           nb_bridge_memory_size(UInt32(RETRO_MEMORY_SYSTEM_RAM)) > 0 {
+            bytes = Data(bytes: memory, count: nb_bridge_memory_size(UInt32(RETRO_MEMORY_SYSTEM_RAM)))
+        } else { bytes = core?.serialize() ?? Data() }
+        var hash: UInt64 = 14695981039346656037
+        for byte in bytes { hash = (hash ^ UInt64(byte)) &* 1099511628211 }
+        return String(format: "%016llx", hash)
+    }
+    @discardableResult private func advanceLockstep(_ count: Int) -> Int {
+        let ran = lockstep.advance(count: count, producing: producing,
+            now: ProcessInfo.processInfo.systemUptime,
+            sample: { [self] in input?.snapshot(port: 0).buttons ?? 0 },
+            run: { [self] p0, p1 in runFrame(port0: InputSnapshot(buttons: p0), port1: InputSnapshot(buttons: p1)) },
+            checksum: { [self] in checksum() }, emit: { [self] name, payload in emit(name, payload) })
+        if lockstep.stalled { clock?.resetDebt() }
+        return ran
     }
 
     // State operations share the core executor with ticks, so serialization never races retro_run.
@@ -367,7 +440,14 @@ public final class EmulatorSession {
     public func setScaling(_ mode: String) { enqueue { [self] in renderer?.setScaling(mode) } }
     public func setStatsVisible(_ visible: Bool) { enqueue { [self] in statsVisible = visible } }
     public func setOption(key: String, value: String, completion: @escaping (Bool) -> Void = { _ in }) {
-        enqueue { [self] in let result = core?.setOption(key: key, value: value) ?? false; main { completion(result) } }
+        setOptionChecked(key: key, value: value) { completion((try? $0.get()) ?? false) }
+    }
+    public func setOptionChecked(key: String, value: String,
+                                 completion: @escaping (Result<Bool, Error>) -> Void) {
+        stateOperation(completion) { [self] in
+            guard !lockstep.active else { throw SessionError(code: "busy", message: "Lockstep is active") }
+            return core?.setOption(key: key, value: value) ?? false
+        }
     }
     public func getStats(completion: @escaping ([String: Any]) -> Void) {
         enqueue { [self] in let value = stats(); main { completion(value) } }
@@ -379,7 +459,9 @@ public final class EmulatorSession {
     private func stats() -> [String: Any] {
         ["fps": fps, "footprintMB": MemoryStats.footprintMB, "audioUnderruns": audio?.underruns ?? 0,
          "frame": frame, "thermalState": MemoryStats.thermalState,
-         "targetFps": targetFps, "linkHz": linkHz, "coreMs": coreMs, "uploadMs": uploadMs]
+         "targetFps": targetFps, "linkHz": linkHz, "coreMs": coreMs, "uploadMs": uploadMs,
+         "lockstepFrame": lockstep.frame, "lockstepWaitPct": lockstepWaitPct,
+         "lockstepBridgeMs": lockstepBridgeMs, "desyncs": 0]
     }
     private func aspect() -> Double {
         guard let g = core?.avInfo.geometry else { return 1 }
@@ -402,16 +484,23 @@ public final class EmulatorSession {
         }
     }
     private func tick(_ count: Int) {
-        guard producing else { return }
+        guard producing, !lockstep.hold else { return }
         tickStats.recordTick()
+        if lockstep.active { lockstepTicks += 1 }
         if count > 0 {
             let before = ProcessInfo.processInfo.systemUptime
-            for _ in 0..<count { runFrame() }
+            let ranFrames: Int
+            if lockstep.active { ranFrames = advanceLockstep(count) }
+            else { for _ in 0..<count { runFrame() }; ranFrames = count }
             let ran = ProcessInfo.processInfo.systemUptime
             renderFrame()
             let rendered = ProcessInfo.processInfo.systemUptime
-            tickStats.recordRun(seconds: ran - before, frames: count)
+            tickStats.recordRun(seconds: ran - before, frames: ranFrames)
             tickStats.recordUpload(seconds: rendered - ran)
+        }
+        if lockstep.active, lockstep.stalled {
+            lockstepWaitTicks += 1
+            if count == 0 { _ = advanceLockstep(0) } // delayed waiting notification still fires
         }
         let now = ProcessInfo.processInfo.systemUptime
         if now - saveTime >= 5 { _ = saveSRAM(); saveTime = now }
@@ -419,6 +508,9 @@ public final class EmulatorSession {
             fps = Double(frame - sampleFrames) / (now - sampleTime)
             let sample = tickStats.sample(elapsed: now - sampleTime)
             linkHz = sample.linkHz; coreMs = sample.coreMs; uploadMs = sample.uploadMs
+            lockstepWaitPct = lockstepTicks > 0 ? Double(lockstepWaitTicks) / Double(lockstepTicks) * 100 : 0
+            lockstepBridgeMs = bridgeCalls > 0 ? bridgeSeconds / Double(bridgeCalls) * 1000 : 0
+            lockstepTicks = 0; lockstepWaitTicks = 0; bridgeSeconds = 0; bridgeCalls = 0
             sampleTime = now; sampleFrames = frame
             if statsVisible { emit("stats", stats()) }
         }

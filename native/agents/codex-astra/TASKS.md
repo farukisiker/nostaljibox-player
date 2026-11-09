@@ -60,3 +60,7 @@ Baseline f646b22 includes reviewed Fable JS. Build-95 refs remain frozen.
 | N1-a / route review | gpt-6.1-sol | pending | model folders | after N0 | 0 | TBD | pending |
 
 N0-b reviewed 13:02: two-slot bridge GCC warning-clean harness passed; session diff checked, Swift regression awaiting CI. Requesting checkpoint; source exclusion automatic in Package.swift.
+N0-b checkpoint 0bfdc82 at 13:02; CI https://github.com/farukisiker/nostaljibox-player/actions/runs/42597830345 running. Lead independently compiled/reran GCC two-port harness, exit0.
+N0-c /root/sol_n0 implementing validated driver/session API (20%, ETA13:25); N0-d /root/terra_n0_plugin gpt-6.1-terra implementing plugin FIFO bridge (20%, ETA13:20). At most2 active. Resume both via followup_task.
+Contract issue sent wp2.requests: JS owns desync count but no API forwards it to native stats. Native reports0 pending architect decision; no undocumented method added.
+N0-b CI GREEN42597830345 (3m22s). N0-c lead reviewed driver/session/tests; requesting independent checkpoint. N0-d reviewed complete plugin held outside agent folder at .ai-runs/dev/astra/terra-plugin-n0.swift so helper can snapshot packages separately. N0-h /root/luna_n0_determinism (gpt-6-luna) preparing tests in scratch before authorized copy, 20%, ETA13:25. Resume via followup_task.
