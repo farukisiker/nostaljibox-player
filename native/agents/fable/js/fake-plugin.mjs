@@ -11,6 +11,7 @@ export function fakePlugin({ state = "AAEC", version = "642d1d1", appVersion = "
     pending: new Map(), // epoch -> Map(frame -> mask)
     hold: false,
     stopped: 0,
+    desyncs: 0, // lockstepNoteDesync calls, as the driver's `desyncs` stat would count them
     loaded: [],
     fail: {}, // method -> error, to make a call reject
 
@@ -58,6 +59,11 @@ export function fakePlugin({ state = "AAEC", version = "642d1d1", appVersion = "
       if (plugin.epoch !== null && epoch < plugin.epoch) return undefined; // dropped
       const target = plugin.epoch !== null && epoch === plugin.epoch ? plugin.remote : (plugin.pending.get(epoch) || plugin.pending.set(epoch, new Map()).get(epoch));
       masks.forEach((m, i) => target.set(from + i, m));
+      return undefined; // CAPPluginReturnNone
+    },
+    lockstepNoteDesync(args) {
+      plugin.calls.push({ method: "lockstepNoteDesync", args });
+      plugin.desyncs += 1; // the driver counts it and emits lockstepState
       return undefined; // CAPPluginReturnNone
     },
     getStateBase64(args) {
