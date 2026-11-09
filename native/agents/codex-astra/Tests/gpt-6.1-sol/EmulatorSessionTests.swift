@@ -118,7 +118,8 @@ final class EmulatorSessionTests: XCTestCase {
         XCTAssertEqual(sample.uploadMs, 2, accuracy: 0.001)
         let empty = stats.sample(elapsed: 1.0)
         XCTAssertEqual(empty.linkHz, 0); XCTAssertEqual(empty.coreMs, 0); XCTAssertEqual(empty.uploadMs, 0)
-        XCTAssertEqual(TickStats().sample(elapsed: 0).linkHz, 0)
+        var fresh = TickStats(); fresh.recordTick()
+        XCTAssertEqual(fresh.sample(elapsed: 0).linkHz, 0) // no division by a zero interval
     }
     func testStatsLabelShowsMeasuredOverTargetRate() {
         let pal = StatsOverlay.text(for: ["fps": 49.97, "targetFps": 50.0, "coreMs": 4.21, "footprintMB": 71.4,
