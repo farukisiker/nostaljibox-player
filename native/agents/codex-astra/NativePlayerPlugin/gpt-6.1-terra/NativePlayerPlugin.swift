@@ -26,17 +26,14 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     private let io = DispatchQueue(label: "native.player.files")
     private var storage: SaveStoring?
     private var session: EmulatorSession?
-    private var original: UIView?
-    private var originalFrame = CGRect.zero
-    private var originalAutoresizing: UIView.AutoresizingMask = []
-    private var originalTranslates = true
-    private var originalBackground: UIColor?
     private var webOpaque = true
     private var scrollOpaque = true
     private var statsOverlay: StatsOverlay?
     private var requestedPadVisible = true
     private var webBackground: UIColor?
     private var scrollBackground: UIColor?
+    private var underPageBackground: UIColor?
+    /// The video view sandwiched below the web view (PLAN §1.1); nil when nothing is installed.
     private var root: UIView?
     private var observation: NSKeyValueObservation?
     private var observers: [NSObjectProtocol] = []
@@ -95,8 +92,9 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         io.async { let cached = (try? self.store().hasRom(gameId: id, size: size, hash: hash)) ?? false
             call.resolve(["cached": cached]) }
     }
-    private func fail(_ call: CAPPluginCall, _ code: String, _ message: String) { notifyListeners("error", data: ["code": code, "message": message])
-        call.reject(message, code) }
+    /// Validation/argument failures before a session began only reject (API.md: "reject + error
+    /// event" is for a start that tore down a running session; the session itself emits that).
+    private func fail(_ call: CAPPluginCall, _ code: String, _ message: String) { call.reject(message, code) }
     @objc func start(_ call: CAPPluginCall) {
 
         let base64 = call.getString("romBase64")
@@ -192,41 +190,32 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
     private func install(layout: [Any], visible: Bool) throws -> (MetalRenderer, InputSource?) {
-        guard let controller = bridge?.viewController, let web = bridge?.webView else { throw Failure(code: "internal", message: "Web view unavailable") }
-        let old = controller.view!
-        let container = UIView(frame: old.frame)
-        container.backgroundColor = .black
-        let video = NativePlayerView(frame: container.bounds)
+        // Sandwich inside the web view's own superview (the UIWindow: CAPBridgeViewController.loadView
+        // makes the WKWebView the root view). controller.view is never reassigned: its setter only
+        // re-points the controller and would leave the window empty.
+        guard let web = bridge?.webView, let host = web.superview else { throw Failure(code: "internal", message: "Web view unavailable") }
+        let video = NativePlayerView(frame: web.frame)
         video.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         let renderer = try MetalRenderer(view: video.metalView)
-        original = old
-        originalBackground = old.backgroundColor
-        originalFrame = old.frame
-        originalAutoresizing = old.autoresizingMask
-        originalTranslates = old.translatesAutoresizingMaskIntoConstraints
         webOpaque = web.isOpaque
         scrollOpaque = web.scrollView.isOpaque
         webBackground = web.backgroundColor
         scrollBackground = web.scrollView.backgroundColor
-        controller.view = container
-        container.addSubview(video)
-        old.frame = container.bounds
-        old.translatesAutoresizingMaskIntoConstraints = true
-        old.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        container.addSubview(old)
-        old.backgroundColor = .clear
+        underPageBackground = web.underPageBackgroundColor
+        host.insertSubview(video, belowSubview: web)
         web.scrollView.isOpaque = false
         web.isOpaque = false
         web.backgroundColor = .clear
         web.scrollView.backgroundColor = .clear
-        root = container
+        web.underPageBackgroundColor = .clear
+        root = video
         var input: InputSource?
         #if canImport(NativeInput)
         requestedPadVisible = visible
-        let touch = TouchPadView(layout: (try? PadLayout(json: layout)) ?? .empty, frame: container.bounds)
+        let touch = TouchPadView(layout: (try? PadLayout(json: layout)) ?? .empty, frame: web.frame)
         touch.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         touch.setVisible(visible)
-        container.addSubview(touch)
+        host.insertSubview(touch, aboveSubview: web)
         pad = touch
         let controllerInput = GamepadInput()
         gamepad = controllerInput
@@ -240,20 +229,25 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         let overlay = StatsOverlay(frame: .zero)
         overlay.isHidden = true
         overlay.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(overlay)
+        host.addSubview(overlay)
         NSLayoutConstraint.activate([
-        overlay.leadingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-        overlay.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor, constant: 12)
+        overlay.leadingAnchor.constraint(equalTo: web.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+        overlay.topAnchor.constraint(equalTo: web.safeAreaLayoutGuide.topAnchor, constant: 12)
         ])
         statsOverlay = overlay
         let center = NotificationCenter.default
+        // Control Center, the notification shade and an incoming-call banner only resign active;
+        // they pause the core under the same "background" reason as a real background transition.
+        observers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.releaseInput()
+            self?.session?.setPauseReason("background", active: true) })
+        observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.session?.setPauseReason("background", active: false) })
         observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.releaseInput()
             self?.session?.setPauseReason("background", active: true) })
         observers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in self?.session?.setPauseReason("background", active: false) })
-        observation = web.observe(\.url, options: [.new]) { [weak self, weak container] view, _ in
-            guard let self = self, let container = container, let url = view.url, url.lastPathComponent != "play.html" else { return }
+        observation = web.observe(\.url, options: [.new]) { [weak self, weak video] view, _ in
+            guard let self = self, let video = video, let url = view.url, url.lastPathComponent != "play.html" else { return }
             self.enqueue { done in
-                guard self.root === container else { done()
+                guard self.root === video else { done()
                     return }
                 self.stopCurrent(reason: "navigation") { _ in done() }
             }
@@ -272,20 +266,14 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         pad = nil
         gamepad = nil
         #endif
-        if original != nil, let web = bridge?.webView { web.isOpaque = webOpaque
+        if root != nil, let web = bridge?.webView { web.isOpaque = webOpaque
             web.scrollView.isOpaque = scrollOpaque
             web.backgroundColor = webBackground
-            web.scrollView.backgroundColor = scrollBackground }
-        if let old = original, let controller = bridge?.viewController { let currentBounds = root?.bounds ?? originalFrame
-            old.removeFromSuperview()
-            old.backgroundColor = originalBackground
-            old.frame = currentBounds
-            old.autoresizingMask = originalAutoresizing
-            old.translatesAutoresizingMaskIntoConstraints = originalTranslates
-            controller.view = old }
+            web.scrollView.backgroundColor = scrollBackground
+            web.underPageBackgroundColor = underPageBackground }
         statsOverlay?.removeFromSuperview()
         statsOverlay = nil
-        original = nil
+        root?.removeFromSuperview()
         root = nil
     }
     private func releaseInput() {
