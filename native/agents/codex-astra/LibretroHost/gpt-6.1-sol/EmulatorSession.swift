@@ -32,6 +32,9 @@ public final class EmulatorSession {
     private var statsVisible = false
     private var frame: UInt64 = 0
     private var fps = 0.0
+    private var targetFps = 0.0
+    private var tickStats = TickStats()
+    private var linkHz = 0.0, coreMs = 0.0, uploadMs = 0.0
     private var sampleFrames: UInt64 = 0
     private var sampleTime = 0.0
     private var saveTime = 0.0
@@ -113,7 +116,8 @@ public final class EmulatorSession {
                 catch { throw SessionError(code: "audio", message: error.localizedDescription) }
                 audio?.onConfigurationChange = { [weak self] in self?.handleConfigurationChange() }
                 observeInterruptions()
-                frame = 0; fps = 0; sampleFrames = 0
+                frame = 0; fps = 0; sampleFrames = 0; targetFps = rate
+                linkHz = 0; coreMs = 0; uploadMs = 0; tickStats = TickStats()
                 sampleTime = ProcessInfo.processInfo.systemUptime; saveTime = sampleTime
                 clock = FrameClock(fps: rate) { [weak self] count in self?.tick(count) }
                 // Seed geometry from av info so the first renderFrame only emits a real change.
@@ -142,7 +146,8 @@ public final class EmulatorSession {
         let existed = started
         started = false; audioRetry = false
         if let observer = interruptionObserver { NotificationCenter.default.removeObserver(observer); interruptionObserver = nil }
-        clock?.stop(); clock = nil; producing = false; fps = 0
+        clock?.stop(); clock = nil; producing = false; fps = 0; targetFps = 0
+        linkHz = 0; coreMs = 0; uploadMs = 0
         audio?.stop(); audio = nil // detach source and destroy renderer before bridge frees its ring
         renderer?.shutdown(); renderer = nil
         let saved = saveSRAM()
@@ -191,9 +196,9 @@ public final class EmulatorSession {
             renderFrame()
             try audio?.start()
             clock?.start()
-            sampleTime = ProcessInfo.processInfo.systemUptime; sampleFrames = frame
+            sampleTime = ProcessInfo.processInfo.systemUptime; sampleFrames = frame; tickStats = TickStats()
         }, pause: { [self] in
-            clock?.pause(); audio?.pause(); fps = 0; _ = saveSRAM()
+            clock?.pause(); audio?.pause(); fps = 0; linkHz = 0; coreMs = 0; uploadMs = 0; _ = saveSRAM()
         })
         if pauses.active { emit("state", ["state": producing ? "running" : "paused", "reasons": pauses.reasons.sorted()]) }
     }
@@ -244,9 +249,14 @@ public final class EmulatorSession {
     public func getStats(completion: @escaping ([String: Any]) -> Void) {
         enqueue { [self] in let value = stats(); main { completion(value) } }
     }
+    /// API.md §3 fields plus additive diagnostics: `targetFps` (the core's av_info rate, so a PAL
+    /// game at 50 is told apart from an NTSC game running slow), `linkHz` (display-link ticks per
+    /// second on the core thread), `coreMs` (average retro_run) and `uploadMs` (average
+    /// latestFrame + render call on the core thread).
     private func stats() -> [String: Any] {
         ["fps": fps, "footprintMB": MemoryStats.footprintMB, "audioUnderruns": audio?.underruns ?? 0,
-         "frame": frame, "thermalState": MemoryStats.thermalState]
+         "frame": frame, "thermalState": MemoryStats.thermalState,
+         "targetFps": targetFps, "linkHz": linkHz, "coreMs": coreMs, "uploadMs": uploadMs]
     }
     private func aspect() -> Double {
         guard let g = core?.avInfo.geometry else { return 1 }
@@ -265,12 +275,22 @@ public final class EmulatorSession {
     }
     private func tick(_ count: Int) {
         guard producing else { return }
-        for _ in 0..<count { runFrame() }
-        if count > 0 { renderFrame() }
+        tickStats.recordTick()
+        if count > 0 {
+            let before = ProcessInfo.processInfo.systemUptime
+            for _ in 0..<count { runFrame() }
+            let ran = ProcessInfo.processInfo.systemUptime
+            renderFrame()
+            let rendered = ProcessInfo.processInfo.systemUptime
+            tickStats.recordRun(seconds: ran - before, frames: count)
+            tickStats.recordUpload(seconds: rendered - ran)
+        }
         let now = ProcessInfo.processInfo.systemUptime
         if now - saveTime >= 5 { _ = saveSRAM(); saveTime = now }
         if now - sampleTime >= 1 {
             fps = Double(frame - sampleFrames) / (now - sampleTime)
+            let sample = tickStats.sample(elapsed: now - sampleTime)
+            linkHz = sample.linkHz; coreMs = sample.coreMs; uploadMs = sample.uploadMs
             sampleTime = now; sampleFrames = frame
             if statsVisible { emit("stats", stats()) }
         }
@@ -297,5 +317,28 @@ public final class EmulatorSession {
             CFRunLoopStop(ownerLoop)
         }
         CFRunLoopWakeUp(ownerLoop)
+    }
+}
+
+/// Per-second counters behind the stats label. Pure so the averages can be unit-tested.
+struct TickStats {
+    private(set) var ticks = 0
+    private(set) var runs = 0
+    private(set) var runSeconds = 0.0
+    private(set) var uploads = 0
+    private(set) var uploadSeconds = 0.0
+    /// One display-link callback, with or without frames to run.
+    mutating func recordTick() { ticks += 1 }
+    /// Wall time of `frames` consecutive retro_run calls.
+    mutating func recordRun(seconds: Double, frames: Int) { runs += frames; runSeconds += seconds }
+    /// Wall time of one latestFrame + render call on the core thread.
+    mutating func recordUpload(seconds: Double) { uploads += 1; uploadSeconds += seconds }
+    /// linkHz = ticks per second, coreMs = average retro_run, uploadMs = average render call; then resets.
+    mutating func sample(elapsed: Double) -> (linkHz: Double, coreMs: Double, uploadMs: Double) {
+        let hz = elapsed > 0 ? Double(ticks) / elapsed : 0
+        let core = runs > 0 ? runSeconds / Double(runs) * 1000 : 0
+        let upload = uploads > 0 ? uploadSeconds / Double(uploads) * 1000 : 0
+        self = TickStats()
+        return (hz, core, upload)
     }
 }

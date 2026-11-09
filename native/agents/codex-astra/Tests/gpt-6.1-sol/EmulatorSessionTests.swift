@@ -98,4 +98,33 @@ final class EmulatorSessionTests: XCTestCase {
             XCTAssertLessThanOrEqual(abs(total - Int(rate * 10)), 1)
         }
     }
+    func testNTSCRateOnSixtyHertzLinkRunsAboutSixHundredAndOneFrames() {
+        var debt = FrameDebt(fps: 60.0988)
+        _ = debt.frames(at: 0)
+        var total = 0
+        for tick in 1...600 { total += debt.frames(at: Double(tick) / 60) }
+        XCTAssertTrue(total == 600 || total == 601, "got \(total)")
+    }
+    func testTickStatsAveragesAndResets() {
+        var stats = TickStats()
+        for _ in 0..<60 { stats.recordTick() }
+        stats.recordRun(seconds: 0.004, frames: 1)
+        stats.recordRun(seconds: 0.010, frames: 2) // 3 runs, 14 ms in total
+        stats.recordUpload(seconds: 0.001)
+        stats.recordUpload(seconds: 0.003)
+        let sample = stats.sample(elapsed: 1.0)
+        XCTAssertEqual(sample.linkHz, 60, accuracy: 0.001)
+        XCTAssertEqual(sample.coreMs, 14.0 / 3, accuracy: 0.001)
+        XCTAssertEqual(sample.uploadMs, 2, accuracy: 0.001)
+        let empty = stats.sample(elapsed: 1.0)
+        XCTAssertEqual(empty.linkHz, 0); XCTAssertEqual(empty.coreMs, 0); XCTAssertEqual(empty.uploadMs, 0)
+        XCTAssertEqual(TickStats().sample(elapsed: 0).linkHz, 0)
+    }
+    func testStatsLabelShowsMeasuredOverTargetRate() {
+        let pal = StatsOverlay.text(for: ["fps": 49.97, "targetFps": 50.0, "coreMs": 4.21, "footprintMB": 71.4,
+                                          "audioUnderruns": UInt64(0), "linkHz": 59.98, "uploadMs": 0.274])
+        XCTAssertEqual(pal, "50/50 fps · core 4.2 ms · 71 MB · und 0\nlink 60 Hz · upload 0.27 ms")
+        let slow = StatsOverlay.text(for: ["fps": 50.2, "targetFps": 60.0988])
+        XCTAssertTrue(slow.hasPrefix("50/60 fps · core 0.0 ms · 0 MB · und 0"))
+    }
 }

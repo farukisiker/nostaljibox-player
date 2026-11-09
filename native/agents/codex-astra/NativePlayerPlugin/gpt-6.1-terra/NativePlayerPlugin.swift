@@ -156,7 +156,7 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
                                 session.onEvent = { [weak self, weak session] event, payload in
                                     guard let self = self, let session = session, self.session === session else { return }
                                     self.notifyListeners(event, data: payload)
-                                    if event == "stats" { self.statsOverlay?.update(fps: payload["fps"] as? Double ?? 0, footprintMB: payload["footprintMB"] as? Double ?? 0) }
+                                    if event == "stats" { self.statsOverlay?.update(stats: payload) }
                                     if event == "stopped", payload["reason"] as? String == "error" {
                                         self.enqueue { done in
                                             guard self.session === session else { done()
