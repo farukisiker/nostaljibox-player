@@ -29,6 +29,48 @@ final class EmulatorSessionTests: XCTestCase {
         XCTAssertFalse(state.running)
         state.resume(); XCTAssertTrue(state.running)
     }
+    /// iOS does not always send interruption .ended: a user resume must still get the game running.
+    func testResumeClearsStaleInterruptionWhenNotBackgrounded() {
+        var state = PauseCoordinator(); state.begin()
+        state.set("interruption", active: true) // .began arrived, .ended never does
+        XCTAssertFalse(state.running)
+        state.resume()
+        XCTAssertTrue(state.reasons.isEmpty)
+        XCTAssertTrue(state.running)
+        // An interruption that ended without .shouldResume leaves only "user"; resume clears that too.
+        state.set("interruption", active: true)
+        state.set("interruption", active: false); state.set("user", active: true)
+        state.resume()
+        XCTAssertTrue(state.running)
+    }
+    func testResumeKeepsInterruptionWhileBackgrounded() {
+        var state = PauseCoordinator(); state.begin()
+        state.set("interruption", active: true); state.set("background", active: true)
+        state.set("user", active: true); state.set("route", active: true)
+        state.resume()
+        XCTAssertEqual(state.reasons, ["background", "interruption"])
+        XCTAssertFalse(state.running)
+        state.set("background", active: false) // back in the foreground, still no .ended
+        XCTAssertFalse(state.running)
+        state.resume()
+        XCTAssertTrue(state.running)
+    }
+    /// EmulatorSession.updateRunning: a start that fails after the resume re-adds "interruption"
+    /// (audioRetry), the next transition removes it again and the start is retried.
+    func testResumeAfterStaleInterruptionRetriesWhenEngineCannotStart() {
+        var state = PauseCoordinator(); state.begin()
+        state.set("interruption", active: true)
+        state.resume()
+        XCTAssertThrowsError(try state.reconcile(currentlyRunning: false, start: {
+            throw SessionError(code: "audio", message: "fake")
+        }, pause: {}))
+        state.set("interruption", active: true) // what updateRunning's catch does
+        XCTAssertEqual(state.reasons, ["interruption"])
+        XCTAssertFalse(state.running)
+        state.set("interruption", active: false) // transition(): audioRetry clears it first
+        state.resume()
+        XCTAssertTrue(state.reconcile(currentlyRunning: false, start: {}, pause: {}))
+    }
     func testRepeatedStopAndFailureRetryClearReasons() {
         var state = PauseCoordinator(); state.begin()
         state.set("background", active: true)

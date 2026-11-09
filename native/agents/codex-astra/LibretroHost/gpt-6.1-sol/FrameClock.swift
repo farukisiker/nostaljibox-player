@@ -45,7 +45,12 @@ final class FrameClock: NSObject {
     @objc private func fired(_ display: CADisplayLink) { tick(debt.frames(at: display.timestamp)) }
 }
 
-/// Each lifecycle source owns only its own reason. Explicit resume also clears route loss.
+/// Each lifecycle source owns only its own reason. Explicit resume also clears route loss and, while
+/// the app is not in the background, a stale interruption: iOS does not always deliver interruption
+/// .ended (another app's audio stopping without notifyOthersOnDeactivation, for example), and without
+/// this the game would stay paused for good. If the engine still cannot start, EmulatorSession's
+/// audioRetry path puts "interruption" back. In the background the reason stays: .ended arrives when
+/// the app returns, and the session must not start audio while backgrounded.
 struct PauseCoordinator {
     private(set) var reasons = Set<String>()
     private(set) var active = false
@@ -53,7 +58,10 @@ struct PauseCoordinator {
     mutating func set(_ reason: String, active: Bool) {
         if active { reasons.insert(reason) } else { reasons.remove(reason) }
     }
-    mutating func resume() { reasons.remove("user"); reasons.remove("route") }
+    mutating func resume() {
+        reasons.remove("user"); reasons.remove("route")
+        if !reasons.contains("background") { reasons.remove("interruption") }
+    }
     mutating func begin() { active = true }
     mutating func end() { active = false; reasons.removeAll() }
     func reconcile(currentlyRunning: Bool, start: () throws -> Void, pause: () -> Void) rethrows -> Bool {

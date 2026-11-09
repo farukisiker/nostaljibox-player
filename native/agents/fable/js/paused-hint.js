@@ -3,9 +3,14 @@
 // pauses itself for reasons the player did not ask for (audio interruption, route loss, app
 // background, config change: EmulatorSession.swift setPauseReason); when it comes back paused and
 // the page shows nothing about it, the screen just sits still. This shows a small centred pill
-// while `state` is "paused" for any reason other than only "user" (the menu's own pause has the
-// menu on screen already) and #native-menu is not visible; a tap calls plugin.resume() (clears
-// `user` and `route`; the next `state` event re-shows the pill if the session stays paused).
+// while `state` is "paused" and #native-menu is not visible (the menu's own pause has the menu on
+// screen; a pause left behind with only "user", e.g. an interruption that ended without
+// shouldResume, has nothing else to tap, above all on the guest page, which has no menu). The
+// only pauses it skips are those whose reasons are nothing but "configChange" and/or
+// "background": each of those sends paused then running within a moment (headphone plug-in,
+// Control Center), and the pill would just flash. A tap calls plugin.resume() (clears `user`,
+// `route` and, outside the background, a stale `interruption`; the next `state` event re-shows the
+// pill if the session stays paused).
 // Hidden on "running", on `stopped`, on pagehide. Installed once per page load, host and guest pages
 // alike: the Capacitor plugin proxy exists before play.js runs on iOS, and the `state` events of
 // whatever session runs later arrive on it. Without the plugin (Android, desktop) it does nothing.
@@ -50,16 +55,23 @@ function isShown(el) {
   return !!el && !el.hidden && !el.classList?.contains("hidden") && el.style?.display !== "none";
 }
 
-// Non-user pause: anything in `reasons` other than "user". An empty list is not a reason to nag.
+// Reasons that clear themselves a moment later (paused → running), so the pill would only flash.
+const TRANSIENT = new Set(["configChange", "background"]);
+
+// Any paused state, except when every reason is transient (and there is at least one). "user"
+// alone counts: after an interruption that ended without shouldResume it is all that is left, and
+// the guest page has no menu to clear it. The menu check in onState covers the menu's own pause.
 export function wantsHint(payload) {
   if (!payload || payload.state !== "paused") return false;
   const reasons = Array.isArray(payload.reasons) ? payload.reasons : [];
-  return reasons.some((r) => r !== "user");
+  return !(reasons.length > 0 && reasons.every((r) => TRANSIENT.has(r)));
 }
 
+// max-width 240px/32vw: on 667–852 pt landscape phones a wider pill reaches into the pad's touch
+// areas (zone box + 30 pt, PadLayout.swift) and the diamond's left button; the text wraps instead.
 const STYLE =
   "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:55;box-sizing:border-box;" +
-  "max-width:min(360px,45vw);padding:10px 18px;border-radius:999px;background:rgba(0,0,0,0.72);" +
+  "max-width:min(240px,32vw);padding:10px 18px;border-radius:22px;background:rgba(0,0,0,0.72);" +
   "color:#fff;font:600 15px/1.3 -apple-system,system-ui,sans-serif;text-align:center;" +
   "cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;";
 

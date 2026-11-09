@@ -102,18 +102,55 @@ test("without a plugin (Android, desktop) nothing is created and every method is
   assert.equal(h.isShown(), false);
 });
 
-test("wantsHint: paused for anything but only `user`", () => {
+test("wantsHint: any paused state, except when only configChange/background (they flash)", () => {
   assert.equal(wantsHint({ state: "paused", reasons: ["interruption"] }), true);
+  assert.equal(wantsHint({ state: "paused", reasons: ["route"] }), true);
   assert.equal(wantsHint({ state: "paused", reasons: ["background", "user"] }), true);
-  assert.equal(wantsHint({ state: "paused", reasons: ["user"] }), false);
-  assert.equal(wantsHint({ state: "paused", reasons: [] }), false);
-  assert.equal(wantsHint({ state: "paused" }), false);
+  // an interruption that ended without shouldResume leaves only "user": the guest has no menu to tap
+  assert.equal(wantsHint({ state: "paused", reasons: ["user"] }), true);
+  assert.equal(wantsHint({ state: "paused", reasons: ["configChange", "user"] }), true);
+  assert.equal(wantsHint({ state: "paused", reasons: ["background", "interruption"] }), true);
+  assert.equal(wantsHint({ state: "paused", reasons: [] }), true); // paused with nothing listed is still stuck
+  assert.equal(wantsHint({ state: "paused" }), true);
+  // paused → running a moment later: no flash
+  assert.equal(wantsHint({ state: "paused", reasons: ["configChange"] }), false);
+  assert.equal(wantsHint({ state: "paused", reasons: ["background"] }), false);
+  assert.equal(wantsHint({ state: "paused", reasons: ["background", "configChange"] }), false);
   assert.equal(wantsHint({ state: "running", reasons: [] }), false);
   assert.equal(wantsHint({ state: "running", reasons: ["route"] }), false);
   assert.equal(wantsHint(null), false);
+  assert.equal(wantsHint({ state: "paused", reasons: "user" }), true); // a malformed list is not a reason to hide
 });
 
-test("shows on a non-user pause, stays hidden for the menu's own pause, hides on running", () => {
+test("configChange/background pauses do not flash the pill; the menu's user pause is covered by the menu", () => {
+  const plugin = hintPlugin();
+  const { doc, win, menu, hint } = dom();
+  const h = installPausedHint({ plugin, document: doc, window: win });
+  plugin.emit("state", { state: "paused", reasons: ["configChange"] }); // headphones plugged in
+  assert.equal(h.isShown(), false);
+  assert.equal(hint(), null);
+  plugin.emit("state", { state: "running", reasons: [] });
+  plugin.emit("state", { state: "paused", reasons: ["background"] }); // Control Center
+  assert.equal(h.isShown(), false);
+  plugin.emit("state", { state: "running", reasons: [] });
+  assert.equal(hint(), null); // never even created
+
+  // the host opens the menu: #native-menu is shown before pause() is called
+  menu.hidden = false;
+  menu.classList.remove("hidden");
+  plugin.emit("state", { state: "paused", reasons: ["user"] });
+  assert.equal(h.isShown(), false);
+  // the guest after an interruption that ended without shouldResume: only "user", no menu anywhere
+  menu.hidden = true;
+  menu.classList.add("hidden");
+  plugin.emit("state", { state: "paused", reasons: ["user"] });
+  assert.equal(h.isShown(), true);
+  hint().fire("click");
+  assert.deepEqual(plugin.names(), ["resume"]);
+  assert.equal(h.isShown(), false);
+});
+
+test("shows on a pause, stays hidden for a transient one, hides on running", () => {
   const plugin = hintPlugin();
   const { doc, win, hint } = dom();
   const h = installPausedHint({ plugin, document: doc, window: win });
@@ -121,7 +158,7 @@ test("shows on a non-user pause, stays hidden for the menu's own pause, hides on
   assert.equal(plugin.listenerCount("stopped"), 1);
   assert.equal(hint(), null); // created lazily: nothing in the DOM until it is needed
 
-  plugin.emit("state", { state: "paused", reasons: ["user"] });
+  plugin.emit("state", { state: "paused", reasons: ["configChange"] });
   assert.equal(h.isShown(), false);
   assert.equal(hint(), null);
 
@@ -134,6 +171,8 @@ test("shows on a non-user pause, stays hidden for the menu's own pause, hides on
   assert.match(el.attrs.style, /position:fixed/);
   assert.match(el.attrs.style, /left:50%;top:50%/);
   assert.match(el.attrs.style, /z-index:55/); // below #native-menu (60), above play.css overlays
+  assert.match(el.attrs.style, /max-width:min\(240px,32vw\)/); // clear of the pad's touch areas in landscape
+  assert.doesNotMatch(el.attrs.style, /white-space:\s*nowrap/); // the text wraps inside that width
   assert.equal(el.attrs.role, "button");
 
   plugin.emit("state", { state: "running", reasons: [] });
@@ -170,7 +209,7 @@ test("a tap hides the hint and calls plugin.resume once; a rejected resume is sw
   const plugin = hintPlugin();
   const { doc, win, hint } = dom();
   const h = installPausedHint({ plugin, document: doc, window: win });
-  plugin.emit("state", { state: "paused", reasons: ["background"] });
+  plugin.emit("state", { state: "paused", reasons: ["route"] });
   const el = hint();
   let prevented = 0;
   el.fire("click", { preventDefault: () => prevented++, stopPropagation: () => {} });
@@ -194,11 +233,11 @@ test("hides on `stopped` and on pagehide", () => {
   const { doc, win } = dom();
   const h = installPausedHint({ plugin, document: doc, window: win });
   assert.equal(win.listenerCount("pagehide"), 1);
-  plugin.emit("state", { state: "paused", reasons: ["configChange"] });
+  plugin.emit("state", { state: "paused", reasons: ["route"] });
   assert.equal(h.isShown(), true);
   plugin.emit("stopped", { reason: "error" });
   assert.equal(h.isShown(), false);
-  plugin.emit("state", { state: "paused", reasons: ["configChange"] });
+  plugin.emit("state", { state: "paused", reasons: ["route"] });
   assert.equal(h.isShown(), true);
   win.fire("pagehide");
   assert.equal(h.isShown(), false);

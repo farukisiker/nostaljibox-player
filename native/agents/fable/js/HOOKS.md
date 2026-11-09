@@ -33,14 +33,18 @@ desktop web) `installPausedHint` returns a no-op handle and touches nothing.
 
 - Shows a centred pill `Duraklatıldı — devam etmek için dokun` / `Paused — tap to resume`
   (TR/EN by the same language choice as `shared/i18n.js`: saved library language, else the
-  phone's; every other language gets English) when `state` is `"paused"` and `reasons` holds
-  anything other than only `"user"` (interruption, route, background, configChange…) and
-  `#native-menu` is not visible (the menu's own pause already has the menu on screen).
-- A tap calls `plugin.resume()` and hides the pill. If the session stays paused (the interruption
-  is still on), the next `state` event shows it again.
+  phone's; every other language gets English) when `state` is `"paused"` and `#native-menu` is
+  not visible (the menu's own pause already has the menu on screen). Only `"user"` counts too: an
+  interruption that ends without `shouldResume` leaves just that, and the guest page has no menu.
+  The one exception: reasons that are nothing but `configChange` and/or `background` (headphone
+  plug-in, Control Center), which go paused → running within a moment and would only flash.
+- A tap calls `plugin.resume()` (clears `user`, `route` and, outside the background, a stale
+  `interruption`: iOS does not always send `.ended`) and hides the pill. If the session stays
+  paused (the engine could not start), the next `state` event shows it again.
 - Hides on `state: "running"`, on the plugin's `stopped` event and on `pagehide`.
 - Its id `native-paused-hint` is not in native-mode's `OVERLAY_IDS` (test-checked), so it never hides
   the native pad. z-index 55: above play.css's overlays (20/30/50), below `#native-menu` (60).
   The native pad is a UIView over the WebView, but `TouchPadView.hitTest` captures only its button
-  and zone areas (API.md §5); the pill sits at the screen centre (max width 45vw), clear of the left
-  zone, the right diamond and the bottom row, so the tap reaches the WebView.
+  and zone areas (API.md §5); the pill sits at the screen centre (max width `min(240px, 32vw)`, the
+  text wraps), clear of the left zone, the right diamond and the bottom row even on 667–852 pt
+  landscape phones, so the tap reaches the WebView.
