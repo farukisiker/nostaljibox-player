@@ -7,6 +7,8 @@ import { t, ejsLanguage, translatePage } from "../shared/i18n.js";
 import "./play.css";
 import { installNativeMode, autoOpenHostLink } from "../native/agents/sonnet-5-5/js/native-mode.js";
 import "../native/agents/sonnet-5-5/native.css";
+import "../native/agents/gemini-argon/js/native-menu.js";
+import "../native/agents/gemini-argon/js/native-menu.css";
 
 translatePage();
 
