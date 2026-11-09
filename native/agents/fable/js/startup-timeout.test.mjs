@@ -72,7 +72,7 @@ test("EJS backend: no timer at all", () => {
   assert.deepEqual(fired, []);
 });
 
-test("strings: English and Turkish, placeholders, language pick", () => {
+test("strings: English and Turkish, placeholders, language pick (all 13 languages: strings.test.mjs)", () => {
   assert.equal(nt("connectionLost", null, "en"), "Connection lost");
   assert.equal(nt("connectionLost", null, "tr"), "Bağlantı koptu");
   assert.match(nt("peerMismatch", { mine: "A", theirs: "B" }, "tr"), /sende A, karşıda B/);
@@ -80,7 +80,8 @@ test("strings: English and Turkish, placeholders, language pick", () => {
   assert.equal(nt("guestBootFailed", { code: "core-load" }, "en"), "The game could not open on this phone (core-load)");
   assert.equal(nt("nope", null, "tr"), "nope");
   assert.equal(pickLang({ navigator: { languages: ["tr-TR", "en"] } }), "tr");
-  assert.equal(pickLang({ navigator: { language: "de-DE" } }), "en");
+  assert.equal(pickLang({ navigator: { language: "de-DE" } }), "de");
+  assert.equal(pickLang({ navigator: { language: "xx-YY" } }), "en");
   assert.equal(pickLang({ localStorage: { getItem: () => "tr" }, navigator: { language: "en" } }), "tr");
   assert.equal(pickLang({}), "en");
   for (const k of NETPLAY_KEYS) assert.notEqual(nt(k, null, "tr"), k, `missing tr: ${k}`);

@@ -20,35 +20,17 @@
 // an open menu covers it. The native pad is a UIView above the WebView, but TouchPadView.hitTest
 // returns self only inside button/zone touch areas (API.md §5); the screen centre is outside the
 // left zone, the right diamond and the bottom row, so the tap reaches this element.
-const TEXT = {
-  en: "Paused — tap to resume",
-  tr: "Duraklatıldı — devam etmek için dokun",
-};
-// The library's language list (shared/i18n.js LANGUAGES); the player's saved choice is honoured
-// when it is one of these, and any language without a text here gets English.
-const APP_LANGS = ["en", "tr", "es", "pt", "fr", "de", "it", "ru", "ja", "ko", "zh", "hi", "id"];
+import { pickLang } from "./lang.js";
+import { nt } from "./strings.js";
 
 export const PAUSED_HINT_ID = "native-paused-hint";
 
-// Same choice as shared/i18n.js pick(): the saved library language, else the phone's, else English.
-export function hintLang(win = globalThis) {
-  let choice = null;
-  try {
-    choice = win.localStorage?.getItem("lang") ?? null;
-  } catch {
-    // storage blocked
-  }
-  if (APP_LANGS.includes(choice)) return choice;
-  const tags = win.navigator?.languages || [win.navigator?.language];
-  for (const tag of tags || []) {
-    const base = String(tag || "").toLowerCase().split("-")[0];
-    if (APP_LANGS.includes(base)) return base;
-  }
-  return "en";
-}
+// The text is strings.js `pausedHint` (13 languages); the language is lang.js pickLang, the same
+// choice as shared/i18n.js pick(): the saved library language, else the phone's, else English.
+export const hintLang = pickLang;
 
 export function hintText(lang = hintLang()) {
-  return TEXT[lang] || TEXT.en;
+  return nt("pausedHint", null, lang);
 }
 
 function isShown(el) {

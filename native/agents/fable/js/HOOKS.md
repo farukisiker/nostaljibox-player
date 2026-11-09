@@ -32,8 +32,9 @@ desktop web) `installPausedHint` returns a no-op handle and touches nothing.
 ## What it does (API.md §3 `state` event, EmulatorSession.swift `setPauseReason`)
 
 - Shows a centred pill `Duraklatıldı — devam etmek için dokun` / `Paused — tap to resume`
-  (TR/EN by the same language choice as `shared/i18n.js`: saved library language, else the
-  phone's; every other language gets English) when `state` is `"paused"` and `#native-menu` is
+  (`strings.js` key `pausedHint`, all 13 app languages; the language is `lang.js` `pickLang`, the
+  same choice as `shared/i18n.js`: saved library language, else the phone's; any other language
+  gets English) when `state` is `"paused"` and `#native-menu` is
   not visible (the menu's own pause already has the menu on screen). Only `"user"` counts too: an
   interruption that ends without `shouldResume` leaves just that, and the guest page has no menu.
   The one exception: reasons that are nothing but `configChange` and/or `background` (headphone
