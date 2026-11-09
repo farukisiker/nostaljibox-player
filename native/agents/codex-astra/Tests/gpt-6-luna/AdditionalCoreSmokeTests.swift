@@ -42,7 +42,9 @@ final class AdditionalCoreSmokeTests: XCTestCase {
             candidates.append(contentsOf: files)
         }
         guard let rom = candidates.sorted(by: { $0.path < $1.path }).first(where: {
-            extensions.contains($0.pathExtension.lowercased())
+            let filename = $0.lastPathComponent.lowercased()
+            return filename != "readme.md" && filename != "license.md" &&
+                extensions.contains($0.pathExtension.lowercased())
         }) else {
             throw XCTSkip("no core/fixture")
         }

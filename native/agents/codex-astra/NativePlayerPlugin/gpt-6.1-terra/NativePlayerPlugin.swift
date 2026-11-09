@@ -167,7 +167,7 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
                                 }
                                 session.setScaling(scaling)
                                 session.setStatsVisible(showStats)
-                                session.setPauseReason("background", active: UIApplication.shared.applicationState == .background)
+                                session.setPauseReason("background", active: UIApplication.shared.applicationState != .active)
                                 session.start(coreURL: coreURL, romURL: romURL, romHash: hash, gameId: id, storage: storage, input: input, renderer: renderer) { result in
                                     switch result {
                                         case .success(let info): call.resolve(info)
@@ -244,6 +244,7 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.releaseInput()
             self?.session?.setPauseReason("background", active: true) })
         observers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in self?.session?.setPauseReason("background", active: false) })
+        observers.append(center.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in _ = self?.session?.flushSRAM() })
         observation = web.observe(\.url, options: [.new]) { [weak self, weak video] view, _ in
             guard let self = self, let video = video, let url = view.url, url.lastPathComponent != "play.html" else { return }
             self.enqueue { done in

@@ -2,6 +2,18 @@ import XCTest
 @testable import LibretroHost
 
 final class SaveStateTests: XCTestCase {
+    func testTerminationFlushWithoutSessionDoesNotWaitForMainCompletion() {
+        let session = EmulatorSession()
+        let finished = expectation(description: "termination flush returns on main")
+        DispatchQueue.main.async {
+            let before = ProcessInfo.processInfo.systemUptime
+            XCTAssertFalse(session.flushSRAM())
+            XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - before, 1.5)
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 4)
+    }
+
     func testStateOperationsWithoutSessionCompleteOnMain() {
         let session = EmulatorSession()
         let done = expectation(description: "all state completions")

@@ -381,6 +381,19 @@ public final class EmulatorSession {
             if statsVisible { emit("stats", stats()) }
         }
     }
+    /// Termination cannot rely on a main-queue completion. Bound the wait if a core is stuck;
+    /// a queued flush may still finish afterwards. The semaphore publishes its result safely.
+    @discardableResult public func flushSRAM() -> Bool {
+        if Thread.current === worker { return saveSRAM() }
+        let finished = DispatchSemaphore(value: 0)
+        var saved = false
+        enqueue { [self] in
+            saved = saveSRAM()
+            finished.signal()
+        }
+        guard finished.wait(timeout: .now() + 2) == .success else { return false }
+        return saved
+    }
     @discardableResult private func saveSRAM() -> Bool {
         guard let memory = core?.saveRAM(), let storage = storage else { return false }
         let data = Data(memory)
