@@ -4,7 +4,8 @@
 // Only one LibretroCore may exist per process (LibretroCore.occupied), so every "second phone" is a
 // sequential fresh load after a full teardown. Cores: NB_CORES_DIR/<core>.framework/<core>;
 // fixtures: NB_FIXTURES_DIR/snes-input/input-test.sfc (fable) and NB_FIXTURES_DIR/{md,segaMD}/pong.md
-// (gemini-argon). WRAM is read through the bridge's public memory API (RETRO_MEMORY_SYSTEM_RAM).
+// (gemini-argon). Checkpoints hash what EmulatorSession.checksum hashes: RETRO_MEMORY_SYSTEM_RAM when the
+// core exposes it, else the serialized state; SNES pad words come from the WRAM variable inside that state.
 // Log lines start with "** [DET]" so native-ci's log grep keeps them.
 import Foundation
 import XCTest
@@ -111,16 +112,37 @@ private final class Phone {
     }
     func saveRAMBytes() -> [UInt8] { core.saveRAM().map { [UInt8]($0) } ?? [] }
 
-    func word(at offset: Int) throws -> UInt16 {
-        guard let ram = systemRAM, offset + 1 < ram.count else {
-            throw DeterminismError("system RAM not exposed by the core (size \(systemRAMSize))")
+    /// The first 0x20000 bytes of WRAM ($7E0000..): from RETRO_MEMORY_SYSTEM_RAM when the core exposes
+    /// it, otherwise out of the savestate. Supafaust (iOS build, lock 642d1d1) reports size 0 for system
+    /// RAM, but its Mednafen state is written with variable names, and `WRAM` is the 128 KiB array in
+    /// it: `u8 nameLength, "WRAM", u32 LE size, data` (Mednafen state.cpp WriteStateChunk).
+    func wram() throws -> [UInt8] {
+        if let ram = systemRAM { return [UInt8](ram) }
+        guard let state = core.serialize() else { throw DeterminismError("system RAM not exposed and serialize() failed") }
+        let bytes = [UInt8](state)
+        let tag: [UInt8] = [4, 0x57, 0x52, 0x41, 0x4D] // "\u{4}WRAM"
+        var sizesSeen: [UInt32] = []
+        var index = 0
+        while index + tag.count + 4 <= bytes.count {
+            if bytes[index] == 4, Array(bytes[index..<index + tag.count]) == tag {
+                let size = UInt32(bytes[index + 5]) | UInt32(bytes[index + 6]) << 8
+                    | UInt32(bytes[index + 7]) << 16 | UInt32(bytes[index + 8]) << 24
+                let start = index + 9
+                if size == 0x20000, start + Int(size) <= bytes.count { return Array(bytes[start..<start + Int(size)]) }
+                sizesSeen.append(size)
+            }
+            index += 1
         }
-        return UInt16(ram[offset]) | (UInt16(ram[offset + 1]) << 8)
+        let head = bytes.prefix(8).map { String(format: "%02X", UInt32($0)) }.joined()
+        let magic = String(decoding: bytes.prefix(8).map { (0x20...0x7E).contains($0) ? $0 : 0x2E }, as: UTF8.self)
+        throw DeterminismError("system RAM not exposed (size \(systemRAMSize)) and no 128 KiB WRAM variable in the \(bytes.count)-byte state (head \(head) \"\(magic)\", WRAM sizes seen \(sizesSeen))")
     }
     func padWords() throws -> PadWords {
-        try PadWords(frame: word(at: 0x00), sum1: word(at: 0x02), sum2: word(at: 0x04),
-                     hash1: word(at: 0x06), hash2: word(at: 0x08), last1: word(at: 0x0A),
-                     last2: word(at: 0x0C), held1: word(at: 0x0E), held2: word(at: 0x10))
+        let ram = try wram()
+        guard ram.count >= 0x12 else { throw DeterminismError("WRAM too small: \(ram.count) bytes") }
+        func word(_ offset: Int) -> UInt16 { UInt16(ram[offset]) | (UInt16(ram[offset + 1]) << 8) }
+        return PadWords(frame: word(0x00), sum1: word(0x02), sum2: word(0x04), hash1: word(0x06), hash2: word(0x08),
+                        last1: word(0x0A), last2: word(0x0C), held1: word(0x0E), held2: word(0x10))
     }
     /// The pad words when the loaded ROM is the SNES input-test ROM, nil for other systems.
     func padWords(ifSNES wanted: Bool) throws -> PadWords? {
@@ -128,13 +150,16 @@ private final class Phone {
         return nil
     }
 
-    /// FNV-1a over system RAM; when a core exposes none, over the last video frame instead.
+    /// FNV-1a over what the native lockstep checksum hashes (EmulatorSession.checksum): system RAM
+    /// when the core exposes it, otherwise the whole serialized state.
     func checkpointHash() -> UInt64 {
         if let ram = systemRAM { return fnv1a(ram) }
-        guard let frame = core.latestFrame() else { return 0 }
-        return frame.data.withUnsafeBytes { fnv1a($0) }
+        guard let state = core.serialize() else { return 0 }
+        return state.withUnsafeBytes { fnv1a($0) }
     }
-    var checkpointSource: String { systemRAM != nil ? "system RAM (\(systemRAMSize) bytes)" : "video frame" }
+    var checkpointSource: String {
+        systemRAM != nil ? "system RAM (\(systemRAMSize) bytes)" : "serialized state (\(core.serializeSize()) bytes)"
+    }
 }
 
 private func fnv1a(_ bytes: UnsafeRawBufferPointer) -> UInt64 {
@@ -290,6 +315,15 @@ final class FableDeterminismTests: XCTestCase {
         var scriptA = InputScript(seed: 0xA11C_E001), scriptB = InputScript(seed: 0xB0B0_0002)
         let port0 = scriptA.masks(frames: scriptFrames), port1 = scriptB.masks(frames: scriptFrames)
         let checkpoints = scriptFrames / checkpointEvery
+        // Pad words are diagnostics for the divergence report; failing to read them must not abort the replay.
+        var wordsError: String?
+        func record(_ phone: Phone) -> PadWords? {
+            guard padWords else { return nil }
+            do { return try phone.padWords() } catch {
+                if wordsError == nil { wordsError = "\(error)" }
+                return nil
+            }
+        }
 
         // Host: clean SRAM, 120 idle frames, S0, then the scripted 600 frames.
         var state = Data()
@@ -301,11 +335,11 @@ final class FableDeterminismTests: XCTestCase {
             phone.idle(preRoll)
             state = try XCTUnwrap(phone.core.serialize(), "\(label): serialize() failed after \(preRoll) frames")
             replay.checkpoints.append(phone.checkpointHash())
-            replay.words.append(try phone.padWords(ifSNES: padWords))
+            replay.words.append(record(phone))
             for c in 0..<checkpoints {
                 phone.play(port0, port1, from: c * checkpointEvery, count: checkpointEvery)
                 replay.checkpoints.append(phone.checkpointHash())
-                replay.words.append(try phone.padWords(ifSNES: padWords))
+                replay.words.append(record(phone))
             }
             replay.saveRAMAtEnd = phone.saveRAMBytes()
             return replay
@@ -325,12 +359,12 @@ final class FableDeterminismTests: XCTestCase {
             XCTAssertTrue(phone.core.unserialize(state), "\(label): unserialize(S0) failed on the fresh load (\(state.count) bytes)")
             replay.saveRAMAfterLoad = phone.saveRAMBytes()
             replay.checkpoints.append(phone.checkpointHash())
-            replay.words.append(try phone.padWords(ifSNES: padWords))
+            replay.words.append(record(phone))
             print("** [DET] \(label) guest: SRAM \(filled) bytes of 0xFF, pre-roll hash \(hex(before)) -> after unserialize \(hex(replay.checkpoints[0]))")
             for c in 0..<checkpoints {
                 phone.play(port0, port1, from: c * checkpointEvery, count: checkpointEvery)
                 replay.checkpoints.append(phone.checkpointHash())
-                replay.words.append(try phone.padWords(ifSNES: padWords))
+                replay.words.append(record(phone))
             }
             replay.saveRAMAtEnd = phone.saveRAMBytes()
             return replay
@@ -356,6 +390,7 @@ final class FableDeterminismTests: XCTestCase {
             if index == 0 { detail += "; the state itself does not restore the hashed memory identically" }
             XCTFail(detail)
         }
+        if let wordsError { XCTFail("\(label): pad words unavailable: \(wordsError)") }
         if padWords, let h = host.words.last ?? nil, let g = guest.words.last ?? nil {
             XCTAssertEqual(h.hash1, g.hash1, "pad-1 history hash differs after replay")
             XCTAssertEqual(h.hash2, g.hash2, "pad-2 history hash differs after replay")
