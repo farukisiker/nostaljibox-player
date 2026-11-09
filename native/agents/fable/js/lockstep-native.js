@@ -8,8 +8,19 @@
 // Plugin contract (API.md §9): lockstepStart/Stop/Hold resolve as soon as they are queued, in call
 // order; pushRemoteInputs and lockstepNoteDesync (v3.1) return nothing; events
 // lockstepInputs/lockstepChecksum/lockstepState.
+//
+// Resync (N1-b, NETPLAY.md §2.1): a checksum mismatch on the host runs the same sequence as game
+// start with the next epoch: hold → getStateBase64 (NBST1 envelope, carried opaquely) → `state`;
+// the guest holds, loads, answers `ready`, starts and unfreezes; the host starts on `ready`. Inputs
+// of the old epoch are dropped by the drivers, the new epoch's are buffered until its start. At most
+// one resync per RESYNC_MIN_GAP_MS; the fourth within RESYNC_BURST_WINDOW_MS ends the link instead
+// (`onUnstable`). `resyncs` is a JS counter: the plugin has no such stat (and its `desyncs` resets
+// on every lockstepStart), see .ai-runs/dev/wp2.requests.
 
 export const DEFAULTS = { delay: 4, batch: 2, checkEvery: 300 };
+export const RESYNC_MIN_GAP_MS = 10000;
+export const RESYNC_BURST_LIMIT = 3;
+export const RESYNC_BURST_WINDOW_MS = 60000;
 
 export function toBase64(bytes, chunk = 3 * 8192) {
   let out = "";
@@ -37,10 +48,13 @@ export class LockstepNative {
     this.onWait = onWait || (() => {});
     this.params = { ...DEFAULTS, ...options };
     this.log = options.log || ((...a) => console.warn(...a));
+    this.now = options.now || (() => Date.now());
     this.epoch = 0;
     this.active = false;
     this.started = false; // lockstepStart issued for the current epoch
     this.desyncs = 0;
+    this.resyncs = 0; // host: states resent after a mismatch (the boot-time one is not counted)
+    this.resyncTimes = []; // host: when those happened, for the burst limit
     this.frame = 0;
     this.hashes = new Map();
     this.handles = [];
@@ -114,9 +128,10 @@ export class LockstepNative {
     return { role, epoch: this.epoch, applied: [0, 0], delay, batch, checkEvery };
   }
 
-  // Host: freeze (already frozen since the channel opened), take the savestate while frozen and send
-  // it with the next epoch. Resolves when the last chunk is queued, so the caller can start the
-  // `ready` timeout. In N0 this runs once, at game start (the guest's `booted`).
+  // Host: freeze (at game start already frozen since the channel opened), take the savestate while
+  // frozen and send it with the next epoch. Resolves when the last chunk is queued, so the caller
+  // can start the `ready` timeout. Runs at game start (the guest's `booted`) and on every resync.
+  // The epoch moves first, so checksums and `ready` of the old epoch are ignored from here on.
   async resync() {
     if (!this.isHost) return;
     this.epoch += 1;
@@ -125,6 +140,36 @@ export class LockstepNative {
     await this.call("lockstepHold", { hold: true });
     const res = await this.plugin.getStateBase64({});
     await this.io.sendBytes({ t: "state", epoch: this.epoch }, fromBase64(res && res.data));
+  }
+
+  // Host, after a mismatch at `frame`: resend the state unless one is already on its way, one went
+  // less than RESYNC_MIN_GAP_MS ago (the next checksum tries again), or this would be the
+  // (RESYNC_BURST_LIMIT+1)th within RESYNC_BURST_WINDOW_MS: then `onUnstable` ends the link.
+  // `onResyncSent(epoch)` fires once the state's last chunk is queued (arm the `ready` timeout),
+  // `onResyncFailed(e)` when the state could not be taken or sent (the host would stay frozen).
+  recover(frame) {
+    if (!this.isHost || !this.active || !this.started) return;
+    const t = this.now();
+    const last = this.resyncTimes.at(-1);
+    if (last !== undefined && t - last < RESYNC_MIN_GAP_MS) {
+      this.log("lockstep: resync throttled", frame);
+      return;
+    }
+    this.resyncTimes = this.resyncTimes.filter((at) => t - at < RESYNC_BURST_WINDOW_MS);
+    if (this.resyncTimes.length >= RESYNC_BURST_LIMIT) {
+      this.log("lockstep: unstable link", this.resyncTimes.length, "resyncs in", RESYNC_BURST_WINDOW_MS / 1000, "s");
+      this.onUnstable?.();
+      return;
+    }
+    this.resyncTimes.push(t);
+    this.resyncs += 1;
+    this.log("lockstep: resync", this.resyncs, "at frame", frame, "→ epoch", this.epoch + 1);
+    this.resync()
+      .then(() => this.active && this.onResyncSent?.(this.epoch))
+      .catch((e) => {
+        this.log("lockstep: resync failed", e);
+        this.onResyncFailed?.(e);
+      });
   }
 
   restart() {
@@ -153,16 +198,22 @@ export class LockstepNative {
     }
   }
 
-  // Guest: load the host's state, tell the host, then start and unfreeze. `ready` leaves before the
-  // first input batch; the driver's `pending` buffer is the safety net if the order ever flips.
+  // Guest: freeze, load the host's state, tell the host, then start and unfreeze. `ready` leaves
+  // before the first input batch; the driver's `pending` buffer is the safety net if the order ever
+  // flips. At game start the guest is already held (guest-link, before `booted`); on a resync it is
+  // running, and the hold stops it before the load. `onLoadFailed(e, resync)` reports a rejected
+  // state (`state-mismatch`, or a core refusal) — the caller ends the session; the hold stays until
+  // detach's lockstepStop clears it.
   async loadState(msg, bytes) {
+    const resync = this.started;
     this.epoch = msg.epoch;
     this.started = false;
+    this.call("lockstepHold", { hold: true });
     try {
       await this.plugin.loadStateBase64({ data: toBase64(bytes || new Uint8Array(0)) });
     } catch (e) {
       this.log("lockstep: loadState failed", e);
-      this.onLoadFailed?.(e);
+      this.onLoadFailed?.(e, resync);
       return;
     }
     if (!this.active) return;
@@ -173,7 +224,8 @@ export class LockstepNative {
     this.io.armHeartbeat?.();
   }
 
-  // Host only. N0: a mismatch is logged and counted; resync comes with N1.
+  // Host only. A mismatch is logged, counted, noted to the driver and (N1-b) recovered from with a
+  // resync, subject to the limits in `recover`.
   compare(frame, hash, whose) {
     const entry = this.hashes.get(frame) || {};
     entry[whose] = hash;
@@ -190,6 +242,7 @@ export class LockstepNative {
         this.call("lockstepNoteDesync", { epoch: this.epoch, frame });
       }
       this.onDesync?.(frame);
+      this.recover(frame);
     }
   }
 }

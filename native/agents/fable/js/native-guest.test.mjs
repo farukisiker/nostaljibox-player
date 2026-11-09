@@ -112,12 +112,14 @@ test("after onStarted the guest-link sequence follows: hold, booted, state → l
   assert.deepEqual(io.sent, [{ t: "booted" }]);
   const state = Uint8Array.from([9, 8, 7]);
   await sync.onMessage({ t: "state", epoch: 1, size: 3 }, state);
-  assert.deepEqual(plugin.names(), ["deleteGame", "isAvailable", "start", "lockstepHold", "lockstepHold", "loadStateBase64", "lockstepStart", "lockstepHold"]);
+  // Three holds: bootNativeGuest's, guest-link's setHold(true) and the load's own (N1-b: on a
+  // resync the guest is running and must freeze before the load; at game start it is a no-op).
+  assert.deepEqual(plugin.names(), ["deleteGame", "isAvailable", "start", "lockstepHold", "lockstepHold", "lockstepHold", "loadStateBase64", "lockstepStart", "lockstepHold"]);
   assert.deepEqual(plugin.loaded, [toBase64(state)]);
   assert.deepEqual(io.sent[1], { t: "ready", epoch: 1 });
-  assert.equal(plugin.calls[6].args.role, 1);
-  assert.equal(plugin.calls[6].args.epoch, 1);
-  assert.deepEqual(plugin.calls[7].args, { hold: false });
+  assert.equal(plugin.calls[7].args.role, 1);
+  assert.equal(plugin.calls[7].args.epoch, 1);
+  assert.deepEqual(plugin.calls[8].args, { hold: false });
   assert.equal(plugin.hold, false);
   assert.equal(io.armed, 1, "heartbeat armed at lockstepStart (§7.1)");
   sync.detach();

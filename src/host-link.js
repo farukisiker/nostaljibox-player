@@ -158,8 +158,9 @@ async function start() {
               hangUp();
             });
         } else if (msg.t === "abort") {
-          // The guest could not start the game (or gave up): back to single player here.
-          toast(nt("guestStartFailed"));
+          // The guest could not start the game, or could not load a resync's state (or gave up):
+          // back to single player here.
+          toast(sync.resyncs > 0 ? nt("resyncFailed", { code: msg.reason || "abort" }) : nt("guestStartFailed"));
           hangUp();
         } else {
           if (msg.t === "ready") {
@@ -172,13 +173,28 @@ async function start() {
       { native: !!native, onLost: lost },
     );
     sync = createLockstep(e, io, true, (waiting) => waiting && toast(t("waitingP2")));
+    // Native only (N1-b, lockstep-native.js): a checksum mismatch resends the state with the next
+    // epoch; the guest then has 30 s to answer `ready`, as at game start. A state that cannot be
+    // taken or sent, or a fourth resync within a minute, ends the link (the guest gets `abort`).
+    sync.onResyncSent = () => startup && startup.expect("ready");
+    sync.onResyncFailed = (err) => {
+      if (io) io.send({ t: "abort", reason: "state" });
+      toast(nt("resyncFailed", { code: err?.code || "state" }));
+      hangUp();
+    };
+    sync.onUnstable = () => {
+      if (io) io.send({ t: "abort", reason: "unstable" });
+      toast(nt("unstableLink"));
+      hangUp();
+    };
     sync.attach();
     // Freeze until the guest has loaded the game and the same savestate.
     sync.setHold(true);
-    // Native only: a guest that never boots must not leave the host frozen (NETPLAY.md §7).
-    startup = startupTimeout(!!native, () => {
+    // Native only: a guest that never boots (or never answers a resync) must not leave the host
+    // frozen (NETPLAY.md §7).
+    startup = startupTimeout(!!native, (name) => {
       io.send({ t: "abort", reason: "timeout" });
-      toast(nt("guestStartFailed"));
+      toast(name === "ready" && sync && sync.resyncs > 0 ? nt("resyncFailed", { code: "timeout" }) : nt("guestStartFailed"));
       hangUp();
     });
     // Library ROMs are stored as Blobs or ArrayBuffers.

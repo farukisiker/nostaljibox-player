@@ -20,9 +20,29 @@ function guest(opts = {}) {
 function host(opts = {}) {
   const plugin = fakePlugin(opts);
   const io = fakeIO();
-  const sync = new LockstepNative(plugin, io, true, opts.onWait, { log: opts.log || quiet });
+  const sync = new LockstepNative(plugin, io, true, opts.onWait, { log: opts.log || quiet, now: opts.now });
   sync.attach();
   return { plugin, io, sync };
+}
+
+// A host whose game runs at epoch 1 (booted → state → ready), with a settable clock.
+async function runningHost(opts = {}) {
+  const clock = { t: 0 };
+  const h = host({ ...opts, now: () => clock.t });
+  h.sync.setHold(true);
+  await h.sync.resync();
+  h.sync.onMessage({ t: "ready", epoch: 1 });
+  h.clock = clock;
+  h.mark = () => (h.mark.at = h.plugin.calls.length);
+  h.since = () => h.plugin.names().slice(h.mark.at);
+  h.mark();
+  return h;
+}
+
+// Both hashes for `frame` at the host's current epoch, differing: one desync.
+function mismatch(h, frame) {
+  h.plugin.emit("lockstepChecksum", { epoch: h.sync.epoch, frame, hash: "aa" });
+  h.sync.onMessage(["h", h.sync.epoch, frame, "bb"]);
 }
 
 test("base64 helpers round-trip", () => {
@@ -36,17 +56,18 @@ test("guest start sequence: hold at boot, state → load, ready, lockstepStart, 
   sync.setHold(true); // guest-link does this right after attach (before `booted`)
   const state = Uint8Array.from([1, 2, 3, 4]);
   const p = sync.onMessage({ t: "state", epoch: 1, size: 4 }, state);
-  // Before the load resolves nothing else has happened.
-  assert.deepEqual(plugin.names(), ["lockstepHold", "loadStateBase64"]);
+  // Before the load resolves nothing else has happened (the load's own hold(true) is a no-op here).
+  assert.deepEqual(plugin.names(), ["lockstepHold", "lockstepHold", "loadStateBase64"]);
+  assert.equal(plugin.hold, true);
   assert.deepEqual(io.sent, []);
   await p;
   assert.deepEqual(plugin.loaded, [toBase64(state)]);
   // `ready` leaves before lockstepStart; start comes before the hold is released.
   assert.deepEqual(io.sent, [{ t: "ready", epoch: 1 }]);
-  assert.deepEqual(plugin.names(), ["lockstepHold", "loadStateBase64", "lockstepStart", "lockstepHold"]);
-  const start = plugin.calls[2].args;
+  assert.deepEqual(plugin.names(), ["lockstepHold", "lockstepHold", "loadStateBase64", "lockstepStart", "lockstepHold"]);
+  const start = plugin.calls[3].args;
   assert.deepEqual(start, { role: 1, epoch: 1, applied: [0, 0], delay: 4, batch: 2, checkEvery: 300 });
-  assert.deepEqual(plugin.calls[3].args, { hold: false });
+  assert.deepEqual(plugin.calls[4].args, { hold: false });
   assert.equal(plugin.hold, false);
   assert.equal(io.armed, 1);
   assert.equal(sync.epoch, 1);
@@ -116,7 +137,7 @@ test("epoch buffering (driver model): inputs for the next epoch wait for its loc
   assert.deepEqual([...plugin.remote], [[0, 5], [1, 6], [2, 7]]);
 });
 
-test("checksum: guest forwards its hash, host compares; a mismatch is logged and counted, no resync in N0", async () => {
+test("checksum: guest forwards its hash, host compares; a mismatch is logged, counted and (N1-b) answered with one resync", async () => {
   const g = guest();
   await g.sync.onMessage({ t: "state", epoch: 1 }, new Uint8Array(1));
   g.plugin.emit("lockstepChecksum", { epoch: 1, frame: 300, hash: "00000000deadbeef" });
@@ -125,48 +146,237 @@ test("checksum: guest forwards its hash, host compares; a mismatch is logged and
   assert.equal(g.io.sent.length, 2);
 
   const logs = [];
-  const h = host({ log: (...a) => logs.push(a) });
-  await h.sync.resync();
-  h.sync.onMessage({ t: "ready", epoch: 1 });
-  const callsAfterStart = h.plugin.calls.length;
+  const h = await runningHost({ log: (...a) => logs.push(a), state: toBase64(Uint8Array.from([4, 2])) });
   h.plugin.emit("lockstepChecksum", { epoch: 1, frame: 300, hash: "aa" });
   h.sync.onMessage(["h", 1, 300, "aa"]);
   assert.equal(h.sync.desyncs, 0);
+  assert.deepEqual(h.since(), []);
   h.sync.onMessage(["h", 1, 600, "bb"]); // guest first this time
   h.plugin.emit("lockstepChecksum", { epoch: 1, frame: 600, hash: "cc" });
   assert.equal(h.sync.desyncs, 1);
-  assert.equal(logs.length, 1);
+  assert.equal(h.sync.resyncs, 1);
   assert.equal(logs[0][0], "lockstep: DESYNC");
   assert.equal(logs[0][1], 600);
-  // The only plugin call after the mismatch is the note to the driver: no state sent, no restart.
-  assert.deepEqual(h.plugin.names().slice(callsAfterStart), ["lockstepNoteDesync"]);
+  // Synchronously: the note to the driver, then the hold; the epoch has already moved on.
+  assert.deepEqual(h.since(), ["lockstepNoteDesync", "lockstepHold"]);
+  assert.deepEqual(h.plugin.calls.at(-1).args, { hold: true });
+  assert.equal(h.sync.epoch, 2);
+  assert.equal(h.sync.started, false);
   assert.equal(h.sync.hashes.size, 0);
+  await tick();
+  await tick();
+  // The state was taken while held and left with epoch 2.
+  assert.deepEqual(h.since(), ["lockstepNoteDesync", "lockstepHold", "getStateBase64"]);
+  assert.equal(h.plugin.hold, true);
+  assert.deepEqual(h.io.sent.at(-1), { t: "state", epoch: 2, size: 2 });
+  assert.deepEqual(h.io.bytes.at(-1), Uint8Array.from([4, 2]));
+});
+
+test("resync, host side: checksums of the old epoch are ignored while the state is on its way; ready(epoch+1) → lockstepStart(epoch+1), hold(false); old inputs dropped, new ones buffered", async () => {
+  const h = await runningHost();
+  let sent = null;
+  h.sync.onResyncSent = (epoch) => (sent = epoch);
+  mismatch(h, 600);
+  await tick();
+  await tick();
+  assert.equal(sent, 2);
+  h.mark();
+  // Late hashes of epoch 1 and a ready for epoch 1 change nothing.
+  h.plugin.emit("lockstepChecksum", { epoch: 1, frame: 900, hash: "aa" });
+  h.sync.onMessage(["h", 1, 900, "bb"]);
+  h.sync.onMessage({ t: "ready", epoch: 1 });
+  assert.deepEqual(h.since(), []);
+  assert.equal(h.sync.desyncs, 1);
+  // Guest inputs for epoch 2 arrive before our start: the driver model buffers them.
+  h.sync.onMessage(["i", 2, 4, [8, 9]]);
+  assert.deepEqual([...h.plugin.pending.get(2)], [[4, 8], [5, 9]]);
+  h.sync.onMessage({ t: "ready", epoch: 2 });
+  assert.deepEqual(h.since(), ["pushRemoteInputs", "lockstepStart", "lockstepHold"]);
+  assert.deepEqual(h.plugin.calls.at(-2).args, { role: 0, epoch: 2, applied: [0, 0], delay: 4, batch: 2, checkEvery: 300 });
+  assert.deepEqual(h.plugin.calls.at(-1).args, { hold: false });
+  assert.equal(h.plugin.hold, false);
+  assert.equal(h.plugin.epoch, 2);
+  assert.deepEqual([...h.plugin.remote], [[4, 8], [5, 9]]); // moved in at lockstepStart(2)
+  h.sync.onMessage(["i", 1, 700, [1]]); // a straggler of epoch 1: dropped by the driver
+  assert.deepEqual([...h.plugin.remote], [[4, 8], [5, 9]]);
+  h.sync.onMessage(["i", 2, 6, [3]]);
+  assert.deepEqual([...h.plugin.remote], [[4, 8], [5, 9], [6, 3]]);
+  // Epoch 2 compares work again.
+  h.plugin.emit("lockstepChecksum", { epoch: 2, frame: 300, hash: "aa" });
+  h.sync.onMessage(["h", 2, 300, "aa"]);
+  assert.equal(h.sync.desyncs, 1);
+  assert.equal(h.sync.hashes.size, 0);
+});
+
+test("resync, guest side: state while running → hold(true), load, ready(epoch), lockstepStart(epoch), hold(false); old-epoch checksums dropped", async () => {
+  const { plugin, io, sync } = guest();
+  sync.setHold(true);
+  await sync.onMessage({ t: "state", epoch: 1 }, new Uint8Array(1)); // game start
+  assert.equal(plugin.hold, false);
+  const before = plugin.calls.length;
+  const state = Uint8Array.from([7, 7, 7]);
+  const p = sync.onMessage({ t: "state", epoch: 2, size: 3 }, state);
+  // Frozen before the load; nothing sent yet.
+  assert.deepEqual(plugin.names().slice(before), ["lockstepHold", "loadStateBase64"]);
+  assert.equal(plugin.hold, true);
+  assert.equal(io.sent.length, 1);
+  plugin.emit("lockstepChecksum", { epoch: 1, frame: 600, hash: "x" }); // the old epoch's last hash
+  assert.equal(io.sent.length, 1);
+  await p;
+  assert.deepEqual(plugin.loaded.at(-1), toBase64(state));
+  assert.deepEqual(io.sent.at(-1), { t: "ready", epoch: 2 });
+  assert.deepEqual(plugin.names().slice(before), ["lockstepHold", "loadStateBase64", "lockstepStart", "lockstepHold"]);
+  assert.deepEqual(plugin.calls.at(-2).args, { role: 1, epoch: 2, applied: [0, 0], delay: 4, batch: 2, checkEvery: 300 });
+  assert.deepEqual(plugin.calls.at(-1).args, { hold: false });
+  assert.equal(plugin.epoch, 2);
+  assert.equal(sync.epoch, 2);
+  plugin.emit("lockstepChecksum", { epoch: 2, frame: 300, hash: "y" });
+  assert.deepEqual(io.sent.at(-1), ["h", 2, 300, "y"]);
+});
+
+test("resync, guest side: a state-mismatch rejection reports onLoadFailed(e, resync=true), no ready, no start, still held", async () => {
+  const { plugin, io, sync } = guest();
+  sync.setHold(true);
+  await sync.onMessage({ t: "state", epoch: 1 }, new Uint8Array(1));
+  const reports = [];
+  sync.onLoadFailed = (e, resync) => reports.push([e.code, resync]);
+  plugin.fail.loadStateBase64 = { code: "state-mismatch", message: "ROM hash differs" };
+  const before = plugin.calls.length;
+  await sync.onMessage({ t: "state", epoch: 2, size: 1 }, new Uint8Array(1));
+  assert.deepEqual(reports, [["state-mismatch", true]]);
+  assert.deepEqual(plugin.names().slice(before), ["lockstepHold", "loadStateBase64"]);
+  assert.equal(plugin.hold, true);
+  assert.equal(io.sent.filter((m) => m.t === "ready").length, 1); // only the boot-time one
+  assert.equal(plugin.epoch, 1); // the driver was never restarted
+  // guest-link's abort → end → detach: lockstepStop clears the hold.
+  sync.detach();
+  assert.equal(plugin.hold, false);
+  // At game start the same failure reports resync=false.
+  const g2 = guest();
+  g2.sync.onLoadFailed = (e, resync) => reports.push([e.code, resync]);
+  g2.plugin.fail.loadStateBase64 = { code: "state-mismatch" };
+  await g2.sync.onMessage({ t: "state", epoch: 1 }, new Uint8Array(1));
+  assert.deepEqual(reports.at(-1), ["state-mismatch", false]);
+});
+
+test("resync rate limit: a second mismatch within 10 s is counted but not resynced; after 10 s it is", async () => {
+  const logs = [];
+  const h = await runningHost({ log: (...a) => logs.push(a) });
+  mismatch(h, 600);
+  await tick();
+  await tick();
+  h.sync.onMessage({ t: "ready", epoch: 2 });
+  assert.equal(h.sync.resyncs, 1);
+  h.mark();
+  h.clock.t = 5000;
+  mismatch(h, 300);
+  assert.equal(h.sync.desyncs, 2);
+  assert.equal(h.sync.resyncs, 1);
+  assert.deepEqual(h.since(), ["lockstepNoteDesync"]); // no hold, no state
+  assert.equal(h.sync.epoch, 2);
+  assert.equal(h.sync.started, true);
+  assert.ok(logs.some((l) => l[0] === "lockstep: resync throttled"));
+  h.clock.t = 10000;
+  mismatch(h, 600);
+  assert.equal(h.sync.resyncs, 2);
+  assert.equal(h.sync.epoch, 3);
+  assert.deepEqual(h.since(), ["lockstepNoteDesync", "lockstepNoteDesync", "lockstepHold"]);
+  await tick();
+  await tick();
+  assert.deepEqual(h.io.sent.at(-1), { t: "state", epoch: 3, size: 3 });
+});
+
+test("unstable link: the fourth resync within a minute is refused and onUnstable fires; the window slides", async () => {
+  const h = await runningHost();
+  let unstable = 0;
+  h.sync.onUnstable = () => (unstable += 1);
+  const cycle = async (t) => {
+    h.clock.t = t;
+    mismatch(h, 600);
+    await tick();
+    await tick();
+    h.sync.onMessage({ t: "ready", epoch: h.sync.epoch });
+  };
+  await cycle(0);
+  await cycle(10000);
+  await cycle(20000);
+  assert.equal(h.sync.resyncs, 3);
+  assert.equal(h.sync.epoch, 4);
+  assert.equal(unstable, 0);
+  h.mark();
+  h.clock.t = 30000;
+  mismatch(h, 600);
+  assert.equal(unstable, 1);
+  assert.equal(h.sync.resyncs, 3);
+  assert.equal(h.sync.epoch, 4); // no fourth state
+  assert.deepEqual(h.since(), ["lockstepNoteDesync"]);
+  // host-link hangs up on onUnstable; if it did not, a mismatch after the first resync left the
+  // window is served again (two in the last 60 s).
+  h.clock.t = 61000;
+  mismatch(h, 900);
+  assert.equal(unstable, 1);
+  assert.equal(h.sync.resyncs, 4);
+  assert.equal(h.sync.epoch, 5);
+});
+
+test("resync failure: getStateBase64 rejecting reports onResyncFailed and is logged, never an unhandled rejection; a mismatch before the game runs or after detach is ignored", async () => {
+  const logs = [];
+  const h = await runningHost({ log: (...a) => logs.push(a) });
+  h.plugin.fail.getStateBase64 = { code: "no-session", message: "No active game" };
+  let failed = null;
+  h.sync.onResyncFailed = (e) => (failed = e);
+  mismatch(h, 600);
+  await tick();
+  await tick();
+  assert.equal(failed.code, "no-session");
+  assert.ok(logs.some((l) => l[0] === "lockstep: resync failed"));
+  assert.equal(h.io.sent.filter((m) => m.t === "state").length, 1); // only the boot-time state
+
+  // Host whose guest has not answered `ready` yet (started=false): hashes do not even compare.
+  const early = host();
+  early.sync.setHold(true);
+  await early.sync.resync();
+  early.mark = early.plugin.calls.length;
+  early.plugin.emit("lockstepChecksum", { epoch: 1, frame: 300, hash: "aa" });
+  early.sync.onMessage(["h", 1, 300, "bb"]);
+  assert.equal(early.sync.desyncs, 1);
+  assert.equal(early.sync.resyncs, 0);
+  assert.deepEqual(early.plugin.names().slice(early.mark), ["lockstepNoteDesync"]);
+
+  // After detach nothing runs.
+  const gone = await runningHost();
+  gone.sync.detach();
+  gone.mark();
+  gone.sync.recover(600);
+  assert.equal(gone.sync.resyncs, 0);
+  assert.deepEqual(gone.since(), []);
 });
 
 test("desync: host tells the driver with lockstepNoteDesync { epoch, frame } without awaiting it; missing method and rejection are harmless", async () => {
   const logs = [];
-  const h = host({ log: (...a) => logs.push(a) });
-  await h.sync.resync();
-  h.sync.onMessage({ t: "ready", epoch: 1 });
-  const before = h.plugin.calls.length;
+  const h = await runningHost({ log: (...a) => logs.push(a) });
   // Match: nothing is noted.
   h.plugin.emit("lockstepChecksum", { epoch: 1, frame: 300, hash: "aa" });
   h.sync.onMessage(["h", 1, 300, "aa"]);
   assert.equal(h.plugin.desyncs, 0);
-  assert.equal(h.plugin.calls.length, before);
-  // Mismatch: noted synchronously, with the host's current epoch and the compared frame.
+  assert.deepEqual(h.since(), []);
+  // Mismatch: noted synchronously, with the host's current epoch and the compared frame, before the resync's hold.
   h.plugin.emit("lockstepChecksum", { epoch: 1, frame: 600, hash: "aa" });
   h.sync.onMessage(["h", 1, 600, "bb"]);
-  assert.deepEqual(h.plugin.calls.at(-1), { method: "lockstepNoteDesync", args: { epoch: 1, frame: 600 } });
+  assert.deepEqual(h.plugin.calls.at(-2), { method: "lockstepNoteDesync", args: { epoch: 1, frame: 600 } });
   assert.equal(h.plugin.desyncs, 1);
   assert.equal(h.sync.desyncs, 1);
-  // A second desync at another frame: another note, same epoch.
-  h.sync.onMessage(["h", 1, 900, "x"]);
-  h.plugin.emit("lockstepChecksum", { epoch: 1, frame: 900, hash: "y" });
-  assert.deepEqual(h.plugin.calls.at(-1).args, { epoch: 1, frame: 900 });
+  // After the resync a desync at another frame: another note, with the new epoch.
+  await tick();
+  await tick();
+  h.sync.onMessage({ t: "ready", epoch: 2 });
+  h.clock.t = 10000;
+  h.sync.onMessage(["h", 2, 900, "x"]);
+  h.plugin.emit("lockstepChecksum", { epoch: 2, frame: 900, hash: "y" });
+  assert.deepEqual(h.plugin.calls.at(-2).args, { epoch: 2, frame: 900 });
   assert.equal(h.plugin.desyncs, 2);
 
-  // Older plugin without the method: counted and logged in JS, no TypeError.
+  // Older plugin without the method: counted and logged in JS, no TypeError, resync still runs.
   const old = host({ log: quiet });
   delete old.plugin.lockstepNoteDesync;
   await old.sync.resync();
@@ -175,7 +385,7 @@ test("desync: host tells the driver with lockstepNoteDesync { epoch, frame } wit
   old.plugin.emit("lockstepChecksum", { epoch: 1, frame: 300, hash: "aa" });
   old.sync.onMessage(["h", 1, 300, "bb"]);
   assert.equal(old.sync.desyncs, 1);
-  assert.equal(old.plugin.calls.length, n);
+  assert.deepEqual(old.plugin.names().slice(n), ["lockstepHold"]);
 
   // A throwing implementation must not break the host's compare path.
   const bad = host({ log: (...a) => logs.push(a) });
@@ -190,6 +400,7 @@ test("desync: host tells the driver with lockstepNoteDesync { epoch, frame } wit
   bad.sync.onMessage(["h", 1, 300, "bb"]);
   assert.equal(bad.sync.desyncs, 1);
   assert.equal(onDesyncFrame, 300);
+  assert.equal(bad.sync.resyncs, 1);
   assert.ok(logs.some((l) => l[0] === "lockstep: lockstepNoteDesync failed"));
 });
 

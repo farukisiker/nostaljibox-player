@@ -74,8 +74,13 @@ export function setupGuestLink(boot, hooks = {}) {
           const started = (target) => {
             startup.got("started");
             sync = createLockstep(target, io, false, (waiting) => waiting && toast(t("waitingHost")));
-            // Native: a state the core rejects ends it now, not after the host's 30 s timeout.
-            sync.onLoadFailed = () => abort("load", nt("guestBootFailed", { code: "load" }));
+            // Native: a state the core rejects (`state-mismatch`, …) ends it now, not after the
+            // host's 30 s timeout; at game start as "could not open", on a resync as "could not
+            // re-sync" (N1-b).
+            sync.onLoadFailed = (err, resync) => {
+              const code = err?.code || "load";
+              abort(code, resync ? nt("resyncFailed", { code }) : nt("guestBootFailed", { code }));
+            };
             sync.attach();
             sync.setHold(true);
             io.send({ t: "booted" });
@@ -97,7 +102,8 @@ export function setupGuestLink(boot, hooks = {}) {
             onEjsStarted: () => io.armHeartbeat(), // EJS guest: the game runs from here (the native one arms at lockstepStart)
           });
         } else if (msg.t === "abort") {
-          end(nt("connectionLost"));
+          // The host gave up: after too many resyncs ("unstable"), else as a lost connection.
+          end(msg.reason === "unstable" ? nt("unstableLink") : nt("connectionLost"));
         } else if (sync) {
           if (msg.t === "state") startup.got("state");
           sync.onMessage(msg, bytes);
