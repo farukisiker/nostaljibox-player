@@ -23,6 +23,7 @@ public final class EmulatorSession {
     private var storage: SaveStoring?
     private var romHash = ""
     private var coreVersion = ""
+    private var coreName = ""
     private var persistSRAM = true
     private var gameId = ""
     private var savedRAM: Data?
@@ -102,7 +103,8 @@ public final class EmulatorSession {
         enqueue { [self] in
             if core != nil { _ = teardown(reason: "user") }
             self.storage = storage; self.romHash = romHash
-            self.coreVersion = coreVersion; self.persistSRAM = persistSRAM
+            self.coreVersion = coreVersion; self.coreName = coreURL.lastPathComponent
+            self.persistSRAM = persistSRAM
             buttons[0] = 0; buttons[1] = 0
             self.gameId = gameId.isEmpty ? romHash : gameId
             self.input = input; self.renderer = renderer
@@ -171,7 +173,7 @@ public final class EmulatorSession {
         core?.setInputPointer(nil)
         core?.unloadGame(); core?.deinitCore(); core = nil
         input = nil; storage = nil; gameId = ""; savedRAM = nil; geometry = [:]
-        coreVersion = ""; persistSRAM = true
+        coreVersion = ""; coreName = ""; persistSRAM = true
         buttons[0] = 0; buttons[1] = 0
         pauses.end()
         if existed { emit("stopped", ["reason": reason]) }
@@ -383,10 +385,14 @@ public final class EmulatorSession {
         guard let data = core?.serialize(), !data.isEmpty else {
             throw SessionError(code: "internal", message: "Core could not serialize state")
         }
-        return data
+        return try StateHeader(core: coreName, coreVersion: coreVersion, romHash: romHash,
+                               size: data.count, frame: frame).encode(payload: data)
     }
-    private func restoreState(_ data: Data) throws {
-        guard !data.isEmpty else { throw SessionError(code: "internal", message: "Empty state data") }
+    private func restoreState(_ data: Data, strictVersion: Bool) throws {
+        // Reject identity/format errors before changing audio, clocks or core state.
+        let decoded = try StateHeader.decode(data, core: coreName, coreVersion: coreVersion,
+                                             romHash: romHash, strictVersion: strictVersion,
+                                             warn: { NSLog("NativePlayer: %@", $0) })
         let wasProducing = producing
         clock?.pause()
         // reset stops the engine before clearing both the queued samples and resampler history.
@@ -410,9 +416,13 @@ public final class EmulatorSession {
                 }
             }
         }
-        guard core?.unserialize(data) == true else {
+        guard core?.unserialize(decoded.payload) == true else {
             throw SessionError(code: "internal", message: "Core rejected state data")
         }
+        // Header frame is informational; keep the live diagnostic counter monotonic. The
+        // lockstep counter is independently reset by lockstepStart, never by a state header.
+        sampleFrames = frame; sampleTime = ProcessInfo.processInfo.systemUptime
+        tickStats = TickStats()
     }
     public func saveState(slot: Int, completion: @escaping (Result<[String: Any], Error>) -> Void) {
         stateOperation(completion) { [self] in
@@ -433,7 +443,7 @@ public final class EmulatorSession {
             catch let error as CocoaError where error.code == .fileReadNoSuchFile {
                 throw SessionError(code: "no-state", message: "No saved state in slot \(slot)")
             }
-            try restoreState(data)
+            try restoreState(data, strictVersion: false)
         }
     }
     public func listStates(completion: @escaping (Result<[[String: Any]], Error>) -> Void) {
@@ -446,7 +456,7 @@ public final class EmulatorSession {
         stateOperation(completion) { [self] in try serializedState() }
     }
     public func unserializeState(_ data: Data, completion: @escaping (Result<Void, Error>) -> Void) {
-        stateOperation(completion) { [self] in try restoreState(data) }
+        stateOperation(completion) { [self] in try restoreState(data, strictVersion: true) }
     }
     public func setScaling(_ mode: String) { enqueue { [self] in renderer?.setScaling(mode) } }
     public func setStatsVisible(_ visible: Bool) { enqueue { [self] in statsVisible = visible } }
