@@ -8,6 +8,8 @@ typedef struct RingBuffer RingBuffer;
 // One producer and one consumer; destroy/clear require both to be quiescent.
 RingBuffer *nb_ring_create(size_t capacityFrames);
 void nb_ring_destroy(RingBuffer *ring);
+// Always stores the newest frames; when the ring is full the OLDEST frames are dropped
+// (counted in overflows). Returns the number of frames stored (frames, capped at capacity).
 size_t nb_ring_write(RingBuffer *ring, const int16_t *samples, size_t frames);
 // Zero-fills missing samples, but returns only the frames actually read.
 size_t nb_ring_read(RingBuffer *ring, int16_t *samples, size_t frames);

@@ -27,24 +27,45 @@ RingBuffer *nb_ring_create(size_t capacityFrames) {
     return r;
 }
 void nb_ring_destroy(RingBuffer *r) { if (r) { free(r->samples); free(r); } }
+// A full ring drops its OLDEST frames so latency stays bounded by the capacity. The producer
+// advances readIndex with a CAS and the consumer with fetch_add, so a read that overlaps an
+// overflow loses neither update; it may return a few already-overwritten frames (a glitch the
+// overflow implies anyway).
 size_t nb_ring_write(RingBuffer *r, const int16_t *samples, size_t frames) {
     if (!r || !samples) return 0;
+    size_t dropped = 0;
+    if (frames > r->capacity) {
+        dropped = frames - r->capacity;
+        samples += dropped * 2;
+        frames = r->capacity;
+    }
     size_t w = atomic_load_explicit(&r->writeIndex, memory_order_relaxed);
-    size_t used = w - atomic_load_explicit(&r->readIndex, memory_order_acquire);
-    size_t count = frames < r->capacity - used ? frames : r->capacity - used;
-    for (size_t i = 0; i < count; ++i) {
+    size_t rd = atomic_load_explicit(&r->readIndex, memory_order_acquire);
+    for (;;) {
+        size_t used = w - rd;
+        if (used > r->capacity) used = r->capacity;
+        if (frames <= r->capacity - used) break;
+        size_t drop = frames - (r->capacity - used);
+        if (atomic_compare_exchange_weak_explicit(&r->readIndex, &rd, rd + drop,
+                                                  memory_order_acq_rel, memory_order_acquire)) {
+            dropped += drop;
+            break;
+        }
+    }
+    for (size_t i = 0; i < frames; ++i) {
         size_t slot = (w + i) % r->capacity;
         r->samples[slot * 2] = samples[i * 2];
         r->samples[slot * 2 + 1] = samples[i * 2 + 1];
     }
-    atomic_store_explicit(&r->writeIndex, w + count, memory_order_release);
-    atomic_fetch_add_explicit(&r->overflows, frames - count, memory_order_relaxed);
-    return count;
+    atomic_store_explicit(&r->writeIndex, w + frames, memory_order_release);
+    if (dropped) atomic_fetch_add_explicit(&r->overflows, dropped, memory_order_relaxed);
+    return frames;
 }
 size_t nb_ring_read(RingBuffer *r, int16_t *samples, size_t frames) {
     if (!r || !samples || frames > SIZE_MAX / (2 * sizeof(int16_t))) return 0;
     size_t rd = atomic_load_explicit(&r->readIndex, memory_order_relaxed);
     size_t available = atomic_load_explicit(&r->writeIndex, memory_order_acquire) - rd;
+    if (available > r->capacity) available = r->capacity;
     size_t count = frames < available ? frames : available;
     for (size_t i = 0; i < count; ++i) {
         size_t slot = (rd + i) % r->capacity;
@@ -52,7 +73,7 @@ size_t nb_ring_read(RingBuffer *r, int16_t *samples, size_t frames) {
         samples[i * 2 + 1] = r->samples[slot * 2 + 1];
     }
     memset(samples + count * 2, 0, (frames - count) * 2 * sizeof(int16_t));
-    atomic_store_explicit(&r->readIndex, rd + count, memory_order_release);
+    atomic_fetch_add_explicit(&r->readIndex, count, memory_order_release);
     atomic_fetch_add_explicit(&r->underruns, frames - count, memory_order_relaxed);
     return count;
 }

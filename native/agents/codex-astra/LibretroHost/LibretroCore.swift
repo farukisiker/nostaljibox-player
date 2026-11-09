@@ -1,5 +1,23 @@
 import Foundation
 import LibretroC
+import os
+
+private let coreLog = OSLog(subsystem: "com.nekketsu.soccer.native", category: "core")
+/// Receives the core's retro_log lines from the bridge (core thread). Public strings on purpose:
+/// a rom-rejected/core-load on a device is undiagnosable without them.
+private func forwardCoreLog(_ level: Int32, _ message: UnsafePointer<CChar>?) {
+    guard let message = message else { return }
+    let type: OSLogType
+    switch level {
+    case 0: type = .debug
+    case 1: type = .info
+    case 3: type = .error
+    default: type = .default
+    }
+    var text = String(cString: message)
+    while text.hasSuffix("\n") { text.removeLast() }
+    os_log("%{public}s", log: coreLog, type: type, text)
+}
 
 public enum LibretroCoreError: Error, LocalizedError {
     case coreLoad(String)
@@ -46,6 +64,7 @@ public final class LibretroCore {
             let saves = saveDirectory ?? root.appendingPathComponent("saves", isDirectory: true)
             try FileManager.default.createDirectory(at: system, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: saves, withIntermediateDirectories: true)
+            nb_bridge_set_log_fn(forwardCoreLog) // deinit clears it, so every core gets it again
             guard nb_bridge_set_directories(system.path, saves.path), nb_bridge_init() else {
                 throw LibretroCoreError.coreLoad("Could not initialize libretro bridge")
             }

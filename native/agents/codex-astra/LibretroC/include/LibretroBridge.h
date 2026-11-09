@@ -35,7 +35,9 @@ bool nb_bridge_set_variable(const char *key, const char *value);
 const char *nb_bridge_get_variable(const char *key);
 // Pointer must stay alive until unset, be 16-bit aligned, and hold a single-copy atomic mask.
 void nb_bridge_set_input_pointer(const uint16_t *buttons);
+// Without a logger, core log lines go to stderr. deinit clears the logger with the session.
 void nb_bridge_set_log_fn(nb_log_fn logger);
+// Valid after nb_bridge_load_game (sized to ~128 ms of the core's sample rate) until deinit.
 RingBuffer *nb_bridge_audio_ring(void);
 bool nb_bridge_set_geometry(const struct retro_game_geometry *geometry);
 // Read/copy on core thread before the next run or geometry change. This is NOT a GPU lease.

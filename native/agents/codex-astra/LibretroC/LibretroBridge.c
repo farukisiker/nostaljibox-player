@@ -110,12 +110,25 @@ bool nb_bridge_set_geometry(const struct retro_game_geometry *g) {
     return true;
 }
 static void RETRO_CALLCONV bridge_log(enum retro_log_level level, const char *format, ...) {
-    if (!session.logger) return;
-    char message[2048];
     va_list args; va_start(args, format);
-    vsnprintf(message, sizeof(message), format, args);
+    if (!session.logger) {
+        vfprintf(stderr, format, args); // no logger installed: keep core output visible
+    } else {
+        char message[2048];
+        vsnprintf(message, sizeof(message), format, args);
+        session.logger((int)level, message);
+    }
     va_end(args);
-    session.logger((int)level, message);
+}
+// ~128 ms of the core's sample rate (PLAN §1.4); 64 ms target, oldest frames dropped when full.
+static bool resize_audio_ring(double sampleRate) {
+    size_t frames = sampleRate > 0 && sampleRate < 1e6 ? (size_t)(sampleRate * 0.128 + 0.5) : 32768;
+    if (frames < 1024) frames = 1024;
+    RingBuffer *ring = nb_ring_create(frames);
+    if (!ring) return false;
+    nb_ring_destroy(session.audio);
+    session.audio = ring;
+    return true;
 }
 static bool RETRO_CALLCONV environment(unsigned command, void *data) {
     if (!data && command != RETRO_ENVIRONMENT_GET_INPUT_BITMASKS) return false;
@@ -277,6 +290,8 @@ bool nb_bridge_load_game(const struct retro_game_info *game) {
     struct retro_system_av_info av = {0}; session.api.get_system_av_info(&av);
     if (!nb_bridge_set_geometry(&av.geometry)) { nb_bridge_unload_game(); return false; }
     session.av.timing = av.timing;
+    // No consumer is attached yet (the host creates AudioOutput after load_game succeeds).
+    if (!resize_audio_ring(av.timing.sample_rate)) { nb_bridge_unload_game(); return false; }
     session.api.set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
     return true;
 }
