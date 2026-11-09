@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Host side of two-phone play: sends the ROM and a savestate to the guest phone, then both run
-// the game in lockstep with the guest as player 2.
+// the game in lockstep with the guest as player 2. The host keeps playing on whatever runs here
+// (EmulatorJS, or the native player on iPhone); the invite says which, and only a guest on the same
+// backend and version is accepted (NETPLAY.md §1.1).
 import {
   createPeer, gatheringDone, encodeDescription, decodeDescription, drawQR, openCamera, stopCamera, scanQR,
   shareInvite, pasteCode, findCode, onInviteLink, listenForAnswer, iceUfrag,
 } from "../shared/link.js";
-import { channelIO, Lockstep } from "./lockstep.js";
+import { channelIO, createLockstep } from "./lockstep.js";
 import { t } from "../shared/i18n.js";
+import { localPeer, pairingProblem, describePeer } from "../native/agents/fable/js/peer-block.js";
+import { startupTimeout } from "../native/agents/fable/js/startup-timeout.js";
+import { nt } from "../native/agents/fable/js/strings.js";
 
 const $ = (s) => document.querySelector(s);
 const panel = $("#link");
@@ -17,6 +22,9 @@ let camera = null;
 let stopScan = null;
 let inbox = null;
 let sync = null;
+let io = null;
+let startup = null;
+let myPeer = null;
 let currentGame = () => null;
 
 export function toast(msg) {
@@ -32,6 +40,11 @@ function emulator() {
   return e && e.gameManager && e.canvas ? e : null;
 }
 
+// The native player's plugin while a native session runs (set by native-mode.js), else null.
+function nativeSession() {
+  return window.nbNative?.plugin || null;
+}
+
 function closePanel() {
   panel.classList.add("hidden");
   if (stopScan) stopScan();
@@ -44,19 +57,48 @@ function stopInbox() {
   inbox = null;
 }
 
+// Every way the link ends goes through here: the lockstep detaches (native: lockstepStop, which also
+// clears the session hold), the heartbeat and startup timers stop, the peer connection closes.
 function hangUp() {
   stopInbox();
+  if (startup) startup.clear();
+  startup = null;
   if (sync) sync.detach();
   sync = null;
+  if (io) io.close();
+  io = null;
   if (pc) pc.close();
   pc = null;
   document.body.classList.remove("linked");
 }
 
+// The link broke (heartbeat silence, ICE failed): single player goes on here.
+function lost() {
+  if (document.body.classList.contains("linked")) toast(nt("connectionLost"));
+  hangUp();
+}
+
+// The pairing message for a guest whose block does not match ours, or null when it does.
+function refusal(theirs) {
+  const problem = pairingProblem(myPeer, theirs);
+  if (!problem) return null;
+  if (problem === "legacy") return nt("guestOutdated");
+  const words = { ejs: nt("backendEjs"), old: nt("backendOld") };
+  return nt("peerMismatch", { mine: describePeer(myPeer, words), theirs: describePeer(theirs, words) });
+}
+
 async function accept(code) {
   if (!pc || pc.remoteDescription) return;
   try {
-    await pc.setRemoteDescription(await decodeDescription(code));
+    const answer = await decodeDescription(code);
+    const message = refusal(answer.peer);
+    if (message) {
+      // Not our pair: no connection, no reload; the game here goes on, the panel says why.
+      hangUp();
+      status.textContent = message;
+      return;
+    }
+    await pc.setRemoteDescription(answer);
     status.textContent = t("connecting");
   } catch (e) {
     status.textContent = e.message || String(e);
@@ -65,12 +107,14 @@ async function accept(code) {
 
 async function start() {
   const e = emulator();
-  if (!e) return toast(t("stillLoading"));
+  const native = nativeSession();
+  if (!e && !native) return toast(t("stillLoading"));
   // The button stays on screen during two-phone play; a stray tap must not cut player 2 off.
   if (sync) return toast(t("p2AlreadyConnected"));
   hangUp();
   panel.classList.remove("hidden");
   status.textContent = t("preparing");
+  myPeer = await localPeer({ plugin: native, system: currentGame()?.game?.core || window.nbNative?.game?.core });
 
   // The guest replies over the Wi-Fi, so only the guest scans a code. Without that inbox (web, or
   // listening failed) the host scans the guest's reply instead.
@@ -97,18 +141,44 @@ async function start() {
     document.body.classList.add("linked");
     toast(t("p2Connected"));
     const { game, rom } = currentGame();
-    const io = channelIO(channel, (msg, bytes) => {
-      if (msg.t === "booted") sync.resync();
-      else sync.onMessage(msg, bytes);
-    });
-    sync = new Lockstep(e, io, true, (waiting) => waiting && toast(t("waitingP2")));
+    io = channelIO(
+      channel,
+      (msg, bytes) => {
+        if (!sync) return; // a late message after hangUp
+        if (msg.t === "booted") {
+          startup.got("booted");
+          // The native lockstep resolves once the state's last chunk is queued; then the guest has
+          // 30 s to answer `ready`. The EJS resync returns nothing and has no timeout.
+          Promise.resolve(sync.resync()).then(() => startup && startup.expect("ready"));
+        } else if (msg.t === "abort") {
+          // The guest could not start the game (or gave up): back to single player here.
+          toast(nt("guestStartFailed"));
+          hangUp();
+        } else {
+          if (msg.t === "ready") {
+            startup.got("ready");
+            io.armHeartbeat(); // the game runs on both phones: 5 s of silence now ends the link
+          }
+          sync.onMessage(msg, bytes);
+        }
+      },
+      { native: !!native, onLost: lost },
+    );
+    sync = createLockstep(e, io, true, (waiting) => waiting && toast(t("waitingP2")));
     sync.attach();
     // Freeze until the guest has loaded the game and the same savestate.
     sync.setHold(true);
+    // Native only: a guest that never boots must not leave the host frozen (NETPLAY.md §7).
+    startup = startupTimeout(!!native, () => {
+      io.send({ t: "abort", reason: "timeout" });
+      toast(nt("guestStartFailed"));
+      hangUp();
+    });
     // Library ROMs are stored as Blobs or ArrayBuffers.
-    new Blob([rom]).arrayBuffer().then((buf) =>
-      io.sendBytes({ t: "rom", name: game.name, file: game.file, core: game.core }, new Uint8Array(buf)),
-    );
+    new Blob([rom])
+      .arrayBuffer()
+      .then((buf) => io.sendBytes({ t: "rom", name: game.name, file: game.file, core: game.core }, new Uint8Array(buf)))
+      .then(() => startup && startup.expect("booted"));
   };
   channel.onclose = () => {
     if (document.body.classList.contains("linked")) toast(t("p2Left"));
@@ -117,12 +187,13 @@ async function start() {
   pc.onconnectionstatechange = () => {
     if (pc && pc.connectionState === "failed") {
       status.textContent = t("connectFailed");
+      if (document.body.classList.contains("linked")) lost();
     }
   };
 
   await pc.setLocalDescription(await pc.createOffer());
   await gatheringDone(pc);
-  const code = await encodeDescription(pc.localDescription, inbox && inbox.info);
+  const code = await encodeDescription(pc.localDescription, inbox && inbox.info, myPeer);
   await drawQR($("#link-qr"), code);
   $("#link-share").onclick = () =>
     shareInvite("join", code)

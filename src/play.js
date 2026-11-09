@@ -248,6 +248,7 @@ if (params.has("join") && reloaded) {
     const rom = game && (await get("roms", id));
     if (!game || !rom) return fail(t("gameNotFound"));
     put("games", id, { ...game, played: Date.now() }).catch(() => {});
+    current = { game, rom }; // the host link needs the ROM in native mode too (boot() is not called then)
     if (await installNativeMode({ params, game, rom, PADS, lockOrientation, bootEmulator: () => boot(game, rom) })) return;
     boot(game, rom);
   })().catch((e) => fail(t("error", { msg: e.message || e })));
