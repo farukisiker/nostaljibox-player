@@ -59,7 +59,8 @@ function plugin() {
  * Resolves true when native mode took over, so play.js must NOT start EmulatorJS itself; that
  * stays true even if the native start later fails, because `bootEmulator` is then called here.
  * Resolves false (nothing touched) on non-iOS, without the plugin, with `nb_native=off`,
- * `?ejs=1`, `?join`, or for a system/container the native side cannot open.
+ * `?ejs=1`, or for a system/container the native side cannot open. (`?join` pages never call
+ * this: the guest's native start is native/agents/fable/js/native-guest.js, N0-f.)
  */
 export async function installNativeMode(ctx) {
   const { params, game, rom, PADS, bootEmulator } = ctx || {};
@@ -93,7 +94,10 @@ export async function installNativeMode(ctx) {
     ev.stopImmediatePropagation?.();
   };
 
-  // #back, #emu-menu and #p2 are handled before play.js's own listeners can see the click.
+  // #back and #emu-menu are handled before play.js's own listeners can see the click. #p2 is NOT
+  // touched (N0-f, NETPLAY.md §9): two-phone play runs on the native lockstep, so the click goes
+  // to play.js's setupHostLink, which finds the session through window.nbNative.plugin; the host
+  // keeps its native session and nothing reloads.
   listen(doc, "click", (ev) => {
     if (!active) return;
     const target = ev.target;
@@ -106,15 +110,6 @@ export async function installNativeMode(ctx) {
       // keep counting as an overlay over the pad.
       doc.getElementById("tools-panel")?.classList?.add("hidden");
       doc.dispatchEvent(new CustomEvent("nb:native-menu"));
-    } else if (closestId(target, "p2")) {
-      // Two-phone play runs on EmulatorJS: end the native session, reload on the EJS path.
-      swallow(ev);
-      stopThenLeave(() => {
-        const url = new URL(globalThis.location.href);
-        url.searchParams.set("ejs", "1");
-        url.searchParams.set("p2", "1");
-        navigate(url.toString());
-      });
     }
   });
   listen(win, "pagehide", () => {
@@ -152,9 +147,18 @@ export async function installNativeMode(ctx) {
       throw e;
     }
   };
+  // Two-phone play (host-link.js sets body.linked while the guest is connected): mirrored on
+  // nbNative.linked so the native menu can hide/disable save, load and reset meanwhile (N0-f;
+  // setOption/reset are refused natively with `busy` while the lockstep runs).
+  const syncLinked = () => {
+    if (win.nbNative) win.nbNative.linked = !!doc.body?.classList?.contains?.("linked");
+  };
   const MO = win.MutationObserver || globalThis.MutationObserver;
   if (typeof MO === "function") {
-    observer = new MO(() => syncPad());
+    observer = new MO(() => {
+      syncPad();
+      syncLinked();
+    });
     // The whole body: #native-menu is created later by the native menu (WP6).
     observer.observe(doc.body, { attributes: true, attributeFilter: ["class", "hidden", "style"], subtree: true, childList: true });
   }
@@ -204,7 +208,8 @@ export async function installNativeMode(ctx) {
     // orientation lock is best effort
   }
   // Extension point for the native menu (WP6): it listens for `nb:native-menu` and uses only these.
-  win.nbNative = { plugin: plugin(), game, onFallback, options, setPadPreference };
+  win.nbNative = { plugin: plugin(), game, onFallback, options, setPadPreference, linked: false };
+  syncLinked();
 
   // bootNative takes `romName` from `game.file` for a ZIP it cannot resolve itself; hand it the inner name.
   const bootGame = inner ? { ...game, file: inner } : game;
@@ -217,8 +222,9 @@ export async function installNativeMode(ctx) {
 }
 
 /**
- * EJS path, called from EJS_onGameStart: after a native `#p2` tap reloaded the page with
- * `ejs=1&p2=1`, open the link panel once, exactly what a #p2 tap does. ctx: { params }.
+ * EJS path, called from EJS_onGameStart: a page loaded with `ejs=1&p2=1` (older builds reloaded
+ * like this on a native `#p2` tap; the URL may still be bookmarked or in history) opens the link
+ * panel once, exactly what a #p2 tap does. ctx: { params }.
  */
 export function autoOpenHostLink(ctx) {
   if (hostLinkOpened || ctx?.params?.get?.("p2") !== "1") return false;

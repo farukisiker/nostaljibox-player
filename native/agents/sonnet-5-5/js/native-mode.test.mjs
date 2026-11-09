@@ -145,12 +145,10 @@ test("returns false on non-iOS and leaves the page alone", async () => {
   assert.equal(dom.doc.documentElement.classList.contains("native"), false);
 });
 
-test("returns false with ?ejs=1 and with ?join", async () => {
-  for (const query of ["?id=g1&ejs=1", "?join"]) {
-    const { ctx } = setup({ query });
-    assert.equal(await installNativeMode(ctx), false, query);
-    assert.equal(plugin.calls.start.length, 0, query);
-  }
+test("returns false with ?ejs=1 (N0-f: ?join is no longer a gate; play.js never calls this for a guest)", async () => {
+  const { ctx } = setup({ query: "?id=g1&ejs=1" });
+  assert.equal(await installNativeMode(ctx), false);
+  assert.equal(plugin.calls.start.length, 0);
 });
 
 test("true path: starts the plugin once with PADS[game.core] and takes the page over", async () => {
@@ -211,17 +209,35 @@ test("#emu-menu dispatches nb:native-menu instead of the EmulatorJS menu", async
   assert.deepEqual(dom.doc.events, ["nb:native-menu"]);
 });
 
-test("#p2 stops native and reloads with ejs=1&p2=1", async () => {
+test("#p2 in native mode stays native (N0-f): the click reaches play.js's host link, no stop, no reload", async () => {
   const { ctx, navigated } = setup();
   await installNativeMode(ctx);
+  const stopsBefore = plugin.calls.stop;
   const ev = click("p2");
-  assert.equal(ev.stopped, true);
+  assert.equal(ev.stopped, false, "setupHostLink's own listener gets the click");
   await settle();
-  assert.equal(navigated.length, 1);
-  const url = new URL(navigated[0]);
-  assert.equal(url.searchParams.get("ejs"), "1");
-  assert.equal(url.searchParams.get("p2"), "1");
-  assert.equal(url.searchParams.get("id"), "g1");
+  assert.deepEqual(navigated, [], "no ejs=1&p2=1 reload");
+  assert.equal(plugin.calls.stop, stopsBefore, "the native session goes on; host-link holds it via lockstepHold");
+  assert.equal(dom.doc.documentElement.classList.contains("native"), true);
+  assert.equal(dom.win.nbNative.plugin, plugin, "host-link.js finds the session here");
+});
+
+test("nbNative.linked mirrors body.linked (host-link sets it while the guest is connected)", async () => {
+  const { ctx } = setup();
+  const set = new Set();
+  dom.doc.body = { classList: { contains: (c) => set.has(c) } };
+  try {
+    await installNativeMode(ctx);
+    assert.equal(dom.win.nbNative.linked, false);
+    set.add("linked");
+    dom.mutate();
+    assert.equal(dom.win.nbNative.linked, true);
+    set.delete("linked");
+    dom.mutate();
+    assert.equal(dom.win.nbNative.linked, false);
+  } finally {
+    dom.doc.body = {};
+  }
 });
 
 test("pagehide stops the native session", async () => {
