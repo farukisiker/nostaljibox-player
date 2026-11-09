@@ -10,8 +10,10 @@ import { bootNativeGuest, stopNativeGuest } from "../native/agents/fable/js/nati
 import "../native/agents/sonnet-5-5/native.css";
 import "../native/agents/gemini-argon/js/native-menu.js";
 import "../native/agents/gemini-argon/js/native-menu.css";
+import { installPausedHint } from "../native/agents/fable/js/paused-hint.js";
 
 translatePage();
+installPausedHint({ plugin: window.Capacitor?.Plugins?.NativePlayer ?? null, document });
 
 const params = new URLSearchParams(location.search);
 const id = params.get("id");
