@@ -87,8 +87,23 @@ if [ "$ACTUAL_COMMIT" != "$COMMIT" ]; then
   exit 1
 fi
 
-PATCH_FILE="$SCRIPT_DIR/patches/${CORE}.patch"
-if [ -f "$PATCH_FILE" ]; then
+if [ -f "$WORKDIR/src/.gitmodules" ]; then
+  echo "Initializing submodules for $CORE..."
+  git -C "$WORKDIR/src" submodule update --init --recursive
+fi
+
+PATCH_FILE=""
+if [ -f "$SCRIPT_DIR/patches/${CORE}.patch" ]; then
+  PATCH_FILE="$SCRIPT_DIR/patches/${CORE}.patch"
+else
+  for candidate in "$SCRIPT_DIR"/*/patches/"${CORE}.patch"; do
+    if [ -f "$candidate" ]; then
+      PATCH_FILE="$candidate"
+      break
+    fi
+  done
+fi
+if [ -n "$PATCH_FILE" ]; then
   echo "Applying patch $PATCH_FILE..."
   git -C "$WORKDIR/src" apply "$PATCH_FILE"
 fi

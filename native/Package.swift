@@ -39,12 +39,12 @@ var pluginDeps: [Target.Dependency] = [
     .product(name: "Capacitor", package: "capacitor-swift-pm"),
     .product(name: "Cordova", package: "capacitor-swift-pm"),
 ]
-// Input (touch pad + game controllers) and save files: whichever agent folder holds the module.
+// Input (touch pad + game controllers), save files, ZIP extraction: whichever agent folder holds the module.
 let agentFolders = ((try? FileManager.default.contentsOfDirectory(atPath: root + "/agents")) ?? [])
     .filter { exists("agents/\($0)") && !$0.hasPrefix(".") }.sorted()
 func folder(of module: String) -> String? { agentFolders.first { exists("agents/\($0)/\(module)") } }
 var moduleFolder: [String: String] = [:]
-for module in ["NativeInput", "NativeSaves"] {
+for module in ["NativeInput", "NativeSaves", "NativeZip"] {
     guard let owner = folder(of: module) else { continue }
     moduleFolder[module] = owner
     targets.append(.target(name: module, dependencies: ["LibretroHost"], path: "agents/\(owner)/\(module)"))
@@ -55,11 +55,17 @@ for (name, core) in cores {
     targets.append(.binaryTarget(name: name, url: core.url, checksum: core.checksum))
     pluginDeps.append(.target(name: name))
 }
-// codex-astra: the Capacitor plugin (the only @objc class in this package).
-targets.append(.target(name: "NativePlayerPlugin", dependencies: pluginDeps,
-                       path: "agents/codex-astra/NativePlayerPlugin",
-                       resources: exists("agents/codex-astra/NativePlayerPlugin/cores-manifest.json")
-                           ? [.copy("cores-manifest.json")] : []))
+// codex-astra: the Capacitor plugin (one @objc(NativePlayerPlugin) class). When a sub-agent of the lead
+// has written a replacement plugin in a model-named sub-folder, that one is compiled and the lead's
+// original stub (and its manifest) are excluded, so the file and class names stay unique.
+let pluginDir = "agents/codex-astra/NativePlayerPlugin"
+let pluginSubfolders = ((try? FileManager.default.contentsOfDirectory(atPath: root + "/" + pluginDir)) ?? []).sorted()
+let replacement = pluginSubfolders.first { exists("\(pluginDir)/\($0)/NativePlayerPlugin.swift") }
+let pluginExclude = replacement == nil ? [] : ["NativePlayerPlugin.swift", "cores-manifest.json"].filter { exists("\(pluginDir)/\($0)") }
+let manifest = [replacement.map { "\($0)/cores-manifest.json" }, "cores-manifest.json"]
+    .compactMap { $0 }.first { exists("\(pluginDir)/\($0)") && !pluginExclude.contains($0) }
+targets.append(.target(name: "NativePlayerPlugin", dependencies: pluginDeps, path: pluginDir,
+                       exclude: pluginExclude, resources: manifest.map { [.copy($0)] } ?? []))
 // Tests, one target per agent folder (agents/<folder>/Tests → <Folder>Tests). Fixtures are read from
 // NB_FIXTURES_DIR (agents/gemini-argon/fixtures).
 for owner in agentFolders where exists("agents/\(owner)/Tests") {

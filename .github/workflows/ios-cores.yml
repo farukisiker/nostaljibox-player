@@ -23,6 +23,11 @@ on:
         required: false
         default: false
         type: boolean
+      validate_only:
+        description: "Skip building/publishing and only run validate-release on current release zips"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -39,6 +44,7 @@ jobs:
       lockhash: ${{ steps.meta.outputs.lockhash }}
       publish: ${{ steps.meta.outputs.publish }}
       force_republish: ${{ steps.meta.outputs.force_republish }}
+      validate_only: ${{ steps.meta.outputs.validate_only }}
     steps:
       - uses: actions/checkout@v4
       - name: Compute lockhash and core matrix
@@ -47,6 +53,7 @@ jobs:
           INPUT_CORES: ${{ inputs.cores }}
           INPUT_PUBLISH: ${{ inputs.publish }}
           INPUT_FORCE_REPUBLISH: ${{ inputs.force_republish }}
+          INPUT_VALIDATE_ONLY: ${{ inputs.validate_only }}
         run: |
           LOCK="native/agents/gemini-argon/ios-cores/cores.lock.json"
           LOCKHASH=$(shasum -a 256 "$LOCK" | cut -c1-12)
@@ -85,8 +92,15 @@ jobs:
             echo "force_republish=false" >> "$GITHUB_OUTPUT"
           fi
 
+          if [ "$INPUT_VALIDATE_ONLY" = "true" ]; then
+            echo "validate_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "validate_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     needs: prepare
+    if: needs.prepare.outputs.validate_only != 'true'
     runs-on: macos-26
     timeout-minutes: 40
     strategy:
@@ -121,7 +135,7 @@ jobs:
 
   publish:
     needs: [prepare, build]
-    if: needs.prepare.outputs.publish == 'true'
+    if: needs.prepare.outputs.validate_only != 'true' && needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -198,3 +212,53 @@ jobs:
             ${{ runner.temp }}/release/*.xcframework.zip
             ${{ runner.temp }}/release/checksums.txt
           if-no-files-found: error
+
+  validate-release:
+    needs: [prepare, publish]
+    if: |
+      always() &&
+      needs.prepare.result == 'success' &&
+      (needs.prepare.outputs.validate_only == 'true' || needs.publish.result == 'success')
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Download release zips and validate each device framework slice
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCKHASH: ${{ needs.prepare.outputs.lockhash }}
+          CORES_JSON: ${{ needs.prepare.outputs.cores }}
+        run: |
+          TAG="ios-cores-$LOCKHASH"
+          echo "=== Validating release $TAG ==="
+          mkdir -p "$RUNNER_TEMP/validate-zips" "$RUNNER_TEMP/validate-unpacked"
+          gh release download "$TAG" -p '*.xcframework.zip' -D "$RUNNER_TEMP/validate-zips"
+
+          VALIDATOR="native/agents/gemini-argon/ci/gemini-3.8-flash-high/validate-ipa.sh"
+          chmod +x "$VALIDATOR"
+
+          CORES_LIST=$(python3 -c 'import json, os; print(" ".join(json.loads(os.environ["CORES_JSON"])))')
+          for CORE in $CORES_LIST; do
+            ZIP="$RUNNER_TEMP/validate-zips/${CORE}.xcframework.zip"
+            if [ ! -f "$ZIP" ]; then
+              echo "ERROR: Missing release zip $ZIP" >&2
+              exit 1
+            fi
+            UNPACK_DIR="$RUNNER_TEMP/validate-unpacked/$CORE"
+            mkdir -p "$UNPACK_DIR"
+            ditto -x -k "$ZIP" "$UNPACK_DIR"
+
+            DEVICE_FW="$UNPACK_DIR/${CORE}.xcframework/ios-arm64/${CORE}.framework"
+            if [ ! -d "$DEVICE_FW" ]; then
+              echo "ERROR: Device framework slice not found at $DEVICE_FW" >&2
+              exit 1
+            fi
+
+            echo "--- Validating $CORE ($DEVICE_FW) ---"
+            bash "$VALIDATOR" --framework "$DEVICE_FW"
+          done

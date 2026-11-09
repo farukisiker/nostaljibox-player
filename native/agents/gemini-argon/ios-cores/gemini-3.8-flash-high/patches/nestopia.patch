@@ -1,0 +1,30 @@
+diff --git a/libretro/Makefile b/libretro/Makefile
+index 776580a..89fe48c 100644
+--- a/libretro/Makefile
++++ b/libretro/Makefile
+@@ -120,15 +120,18 @@ else ifneq (,$(findstring ios,$(platform)))
+ 	  CC = cc -arch armv7 -isysroot $(IOSSDK)
+ 	  CXX = c++ -arch armv7 -isysroot $(IOSSDK)
+ 	endif
+-ifeq ($(platform),$(filter $(platform),ios9 ios-arm64))
+-	CC               += -miphoneos-version-min=8.0
+-	CXX              += -miphoneos-version-min=8.0
+-	PLATFORM_DEFINES += -miphoneos-version-min=8.0
++ifeq ($(IPHONEMINVER),)
++ifneq ($(MINVERSION),)
++	IPHONEMINVER := $(MINVERSION)
++else ifeq ($(platform),$(filter $(platform),ios9 ios-arm64))
++	IPHONEMINVER = -miphoneos-version-min=8.0
+ else
+-	CC               += -miphoneos-version-min=5.0
+-	CXX              += -miphoneos-version-min=5.0
+-	PLATFORM_DEFINES += -miphoneos-version-min=5.0
++	IPHONEMINVER = -miphoneos-version-min=5.0
+ endif
++endif
++	CC               += $(IPHONEMINVER)
++	CXX              += $(IPHONEMINVER)
++	PLATFORM_DEFINES += $(IPHONEMINVER)
+ 
+ # tvOS
+ else ifeq ($(platform), tvos-arm64)
