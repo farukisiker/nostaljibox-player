@@ -181,7 +181,12 @@ public final class EmulatorSession {
     }
     public func pause(completion: @escaping () -> Void = {}) { setPauseReason("user", active: true, completion: completion) }
     public func resume(completion: @escaping () -> Void = {}) {
-        enqueue { [self] in routeRecovery = RouteRecovery(); transition { pauses.resume() }; main(completion) }
+        enqueue { [self] in
+            routeRecovery.clearLoss()
+            let outputs = Self.routeOutputs(AVAudioSession.sharedInstance().currentRoute)
+            routeRecovery.observe(outputs: outputs.all, externalOutputs: outputs.external)
+            transition { pauses.resume() }; main(completion)
+        }
     }
     public func setPauseReason(_ reason: String, active: Bool, completion: @escaping () -> Void = {}) {
         enqueue { [self] in transition { pauses.set(reason, active: active) }; main(completion) }
@@ -251,7 +256,18 @@ public final class EmulatorSession {
             }
         }
     }
+    private static func routeOutputs(_ route: AVAudioSessionRouteDescription) -> (all: Set<String>, external: Set<String>) {
+        let all = Set(route.outputs.map { $0.uid })
+        // Built-in outputs routinely disappear on headphone insertion. Their disappearance is
+        // not a privacy-sensitive unplug, unlike loss of an external listening route.
+        let external = Set(route.outputs.filter {
+            $0.portType != .builtInSpeaker && $0.portType != .builtInReceiver
+        }.map { $0.uid })
+        return (all, external)
+    }
     private func observeRouteChanges() {
+        let baseline = Self.routeOutputs(AVAudioSession.sharedInstance().currentRoute)
+        routeRecovery.observe(outputs: baseline.all, externalOutputs: baseline.external)
         if let observer = routeObserver { NotificationCenter.default.removeObserver(observer) }
         routeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification, object: AVAudioSession.sharedInstance(), queue: nil) { [weak self] note in
@@ -259,16 +275,18 @@ public final class EmulatorSession {
                   let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }
             let previous = note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription
             let oldOutputs = Set(previous?.outputs.map { $0.uid } ?? [])
-            let currentOutputs = Set(AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.uid })
+            let currentOutputs = Self.routeOutputs(AVAudioSession.sharedInstance().currentRoute)
             let now = ProcessInfo.processInfo.systemUptime
             self.enqueue {
                 guard self.started else { return }
+                defer { self.routeRecovery.observe(outputs: currentOutputs.all, externalOutputs: currentOutputs.external) }
                 switch reason {
                 case .oldDeviceUnavailable:
-                    self.routeRecovery.lost(outputs: oldOutputs, at: now)
-                    self.transition { self.pauses.set("route", active: true) }
+                    if self.routeRecovery.outputLost(previous: oldOutputs, current: currentOutputs.all, at: now) {
+                        self.transition { self.pauses.set("route", active: true) }
+                    }
                 case .newDeviceAvailable:
-                    if self.routeRecovery.returned(outputs: currentOutputs, at: now) {
+                    if self.routeRecovery.returned(outputs: currentOutputs.all, at: now) {
                         self.transition { self.pauses.set("route", active: false) }
                     }
                 default: break
@@ -277,9 +295,17 @@ public final class EmulatorSession {
         }
     }
     private func handleConfigurationChange() {
+        // Capture at notification time, rather than after unrelated route callbacks can run.
+        let currentOutputs = Self.routeOutputs(AVAudioSession.sharedInstance().currentRoute)
+        let now = ProcessInfo.processInfo.systemUptime
         enqueue { [self] in
             guard started, let audio = audio else { return }
-            transition { pauses.set("configChange", active: true) } // stops the clock and engine
+            let lostOutput = routeRecovery.configurationChanged(outputs: currentOutputs.all,
+                externalOutputs: currentOutputs.external, at: now)
+            transition {
+                pauses.set("configChange", active: true)
+                if lostOutput { pauses.set("route", active: true) }
+            } // the route gate is in place before reconnect or any engine restart
             do { try audio.reconnect() } catch { report(SessionError(code: "audio", message: error.localizedDescription)) }
             transition { pauses.set("configChange", active: false) } // restarts only if nothing else pauses
         }
@@ -580,9 +606,31 @@ public final class EmulatorSession {
 struct RouteRecovery {
     private var outputs: Set<String> = []
     private var lostAt: TimeInterval?
+    private var observedOutputs = Set<String>()
+    private var observedExternalOutputs = Set<String>()
+    mutating func observe(outputs: Set<String>, externalOutputs: Set<String>) {
+        observedOutputs = outputs; observedExternalOutputs = externalOutputs
+    }
+    mutating func clearLoss() { outputs.removeAll(); lostAt = nil }
     mutating func lost(outputs: Set<String>, at time: TimeInterval) {
+        // Config and route notifications for one unplug must not extend the recovery window.
+        if lostAt != nil, self.outputs == outputs { return }
         self.outputs = outputs
         lostAt = time
+    }
+    mutating func outputLost(previous: Set<String>, current: Set<String>, at time: TimeInterval) -> Bool {
+        guard !previous.subtracting(current).isEmpty else { return false }
+        lost(outputs: previous, at: time)
+        return true
+    }
+    mutating func configurationChanged(outputs: Set<String>, externalOutputs: Set<String>,
+                                       at time: TimeInterval) -> Bool {
+        let previous = observedOutputs
+        let disappeared = observedExternalOutputs.subtracting(outputs)
+        observe(outputs: outputs, externalOutputs: externalOutputs)
+        guard !disappeared.isEmpty else { return false }
+        lost(outputs: previous, at: time)
+        return true
     }
     mutating func returned(outputs: Set<String>, at time: TimeInterval) -> Bool {
         guard let lostAt = lostAt, !self.outputs.isEmpty, outputs == self.outputs,
