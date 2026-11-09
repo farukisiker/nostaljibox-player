@@ -8,11 +8,12 @@ Previous M1b rows below are historical; M1b was completed and device-tested afte
 
 | Item | Model | Agent/thread ID | Files | Status | % | ETA local | Resume |
 |---|---|---|---|---|---:|---|---|
-| 1a Session save states + roundtrip tests | gpt-6.1-sol | /root/sol_m2_states | LibretroHost/gpt-6.1-sol/, Tests/gpt-6.1-sol/ | reviewed; checkpoint/CI pending | 85 | 08:05 | followup_task(target="/root/sol_m2_states", message="...") |
-| 1b Plugin state API | gpt-6.1-terra | /root/terra_m2_states | NativePlayerPlugin/gpt-6.1-terra/ | reviewed; checkpoint/CI pending | 85 | 08:05 | followup_task(target="/root/terra_m2_states", message="...") |
-| 2 Inactive start, fixture filter, termination SRAM flush | gpt-6.1-sol, gpt-6.1-terra, gpt-6-luna | /root/sol_m2_states, /root/terra_m2_states, /root/luna_m2_filter | corresponding model folders | reviewed, waiting item 1 CI before checkpoint | 80 | 08:05 | followup_task on respective agent |
-| 3 Fable review | lead + gpt-6-sol | /root, /root/sol6_ring_review | TASKS.md | audio ring concurrency concern under confirmation | 70 | 08:10 | root |
-| 4 Route-loss manual resume | gpt-6.1-sol | pending | LibretroHost/gpt-6.1-sol/ | optional after 1–3 | 0 | 08:25 | pending |
+| 1a Session save states + roundtrip tests | gpt-6.1-sol | /root/sol_m2_states | LibretroHost/gpt-6.1-sol/, Tests/gpt-6.1-sol/ | 33d67b1, CI 42564524304 green | 100 | done | followup_task(target="/root/sol_m2_states", message="...") |
+| 1b Plugin state API | gpt-6.1-terra | /root/terra_m2_states | NativePlayerPlugin/gpt-6.1-terra/ | 33d67b1, CI 42564524304 green | 100 | done | followup_task(target="/root/terra_m2_states", message="...") |
+| 2 Inactive start, fixture filter, termination SRAM flush | gpt-6.1-sol, gpt-6.1-terra, gpt-6-luna | /root/sol_m2_states, /root/terra_m2_states, /root/luna_m2_filter | corresponding model folders | 6c4dcdf, CI 42564868518 green | 100 | done | followup_task on respective agent |
+| 3 Fable review | lead + gpt-6-sol | /root, /root/sol6_ring_review | TASKS.md | confirmed ring race; replacement requested | 100 | done | root |
+| 3a Correct confirmed overflow race | gpt-6-sol | /root/sol6_ring_review | LibretroC/gpt-6-sol/ | stress passed; waiting root-source exclusion | 85 | 08:15 | followup_task(target="/root/sol6_ring_review", message="...") |
+| 4 Route-loss manual resume | gpt-6.1-sol | /root/sol_m2_states | LibretroHost/gpt-6.1-sol/, Tests/gpt-6.1-sol/ | reviewed, waiting final checkpoint/CI | 85 | 08:15 | followup_task(target="/root/sol_m2_states", message="...") |
 
 Initial review concern for item 3: Fable's drop-oldest ring now permits producer writes to non-atomic
 sample storage concurrently with consumer reads. CAS/fetch_add on readIndex does not protect payload

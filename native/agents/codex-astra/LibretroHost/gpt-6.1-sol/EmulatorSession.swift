@@ -41,6 +41,8 @@ public final class EmulatorSession {
     private var saveTime = 0.0
     private var geometry: [String: Any] = [:]
     private var interruptionObserver: NSObjectProtocol?
+    private var routeObserver: NSObjectProtocol?
+    private var routeRecovery = RouteRecovery()
 
     public init() {
         let ready = DispatchSemaphore(value: 0)
@@ -148,6 +150,8 @@ public final class EmulatorSession {
         let existed = started
         started = false; audioRetry = false
         if let observer = interruptionObserver { NotificationCenter.default.removeObserver(observer); interruptionObserver = nil }
+        if let observer = routeObserver { NotificationCenter.default.removeObserver(observer); routeObserver = nil }
+        routeRecovery = RouteRecovery()
         clock?.stop(); clock = nil; producing = false; fps = 0; targetFps = 0
         linkHz = 0; coreMs = 0; uploadMs = 0
         audio?.stop(); audio = nil // detach source and destroy renderer before bridge frees its ring
@@ -162,7 +166,7 @@ public final class EmulatorSession {
     }
     public func pause(completion: @escaping () -> Void = {}) { setPauseReason("user", active: true, completion: completion) }
     public func resume(completion: @escaping () -> Void = {}) {
-        enqueue { [self] in transition { pauses.resume() }; main(completion) }
+        enqueue { [self] in routeRecovery = RouteRecovery(); transition { pauses.resume() }; main(completion) }
     }
     public func setPauseReason(_ reason: String, active: Bool, completion: @escaping () -> Void = {}) {
         enqueue { [self] in transition { pauses.set(reason, active: active) }; main(completion) }
@@ -208,6 +212,7 @@ public final class EmulatorSession {
     // MARK: Audio session events (PLAN §1.5). Notifications arrive on arbitrary threads; all
     // state changes are enqueued onto the core RunLoop.
     private func observeInterruptions() {
+        observeRouteChanges()
         if let observer = interruptionObserver { NotificationCenter.default.removeObserver(observer) }
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(), queue: nil) { [weak self] note in
@@ -228,6 +233,31 @@ public final class EmulatorSession {
                     }
                 }
             @unknown default: break
+            }
+        }
+    }
+    private func observeRouteChanges() {
+        if let observer = routeObserver { NotificationCenter.default.removeObserver(observer) }
+        routeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: AVAudioSession.sharedInstance(), queue: nil) { [weak self] note in
+            guard let self = self, let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }
+            let previous = note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription
+            let oldOutputs = Set(previous?.outputs.map { $0.uid } ?? [])
+            let currentOutputs = Set(AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.uid })
+            let now = ProcessInfo.processInfo.systemUptime
+            self.enqueue {
+                guard self.started else { return }
+                switch reason {
+                case .oldDeviceUnavailable:
+                    self.routeRecovery.lost(outputs: oldOutputs, at: now)
+                    self.transition { self.pauses.set("route", active: true) }
+                case .newDeviceAvailable:
+                    if self.routeRecovery.returned(outputs: currentOutputs, at: now) {
+                        self.transition { self.pauses.set("route", active: false) }
+                    }
+                default: break
+                }
             }
         }
     }
@@ -403,6 +433,7 @@ public final class EmulatorSession {
     }
     deinit {
         if let observer = interruptionObserver { NotificationCenter.default.removeObserver(observer) }
+        if let observer = routeObserver { NotificationCenter.default.removeObserver(observer) }
         let oldCore = core, oldRenderer = renderer, oldClock = clock
         var retiredAudio = audio
         audio = nil; core = nil; renderer = nil; clock = nil
@@ -416,6 +447,23 @@ public final class EmulatorSession {
             CFRunLoopStop(ownerLoop)
         }
         CFRunLoopWakeUp(ownerLoop)
+    }
+}
+
+/// Only an identical output UID set returning within two seconds permits automatic recovery.
+/// Empty/unknown route identities always require an explicit resume.
+struct RouteRecovery {
+    private var outputs: Set<String> = []
+    private var lostAt: TimeInterval?
+    mutating func lost(outputs: Set<String>, at time: TimeInterval) {
+        self.outputs = outputs
+        lostAt = time
+    }
+    mutating func returned(outputs: Set<String>, at time: TimeInterval) -> Bool {
+        guard let lostAt = lostAt, !self.outputs.isEmpty, outputs == self.outputs,
+              time >= lostAt, time - lostAt <= 2 else { return false }
+        self = RouteRecovery()
+        return true
     }
 }
 
