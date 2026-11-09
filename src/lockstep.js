@@ -4,6 +4,9 @@
 // and does not run a frame before it has the other phone's buttons for it, so both emulators see
 // the same input on the same frame and show the same game, each at full quality on its own screen.
 
+import { createHeartbeat } from "../native/agents/fable/js/heartbeat.js";
+import { LockstepNative } from "../native/agents/fable/js/lockstep-native.js";
+
 const DELAY = 3; // frames of input delay (~50 ms), the same for both players
 const CHECK_EVERY = 300; // frames between savestate comparisons (~5 s)
 const BIG_STATE = 4 << 20; // DS/PS1-sized states take long to hash: compare them once a minute
@@ -14,16 +17,24 @@ const MAX_MASK = 1024; // more unrestored bytes than this means the load itself 
 
 // JSON messages plus binary transfers (ROM, savestate) on one data channel. A JSON message with a
 // `size` announces that many bytes of binary chunks; onMessage gets it once they have all arrived.
-export function channelIO(channel, onMessage) {
+// Also the heartbeat (NETPLAY.md §7.1, both backends): `{ t: "hb" }` every second, swallowed on
+// arrival; `onLost()` fires on silence (see heartbeat.js for the two-tier limit), `armHeartbeat()`
+// switches to the 5 s limit once the game runs, `close()` stops the timer (hangUp / onclose).
+export function channelIO(channel, onMessage, { native = false, onLost = () => {}, timers = {} } = {}) {
   channel.binaryType = "arraybuffer";
   let incoming = null;
+  const hb = createHeartbeat({ send: () => send({ t: "hb" }), onLost, native, ...timers });
+  if (channel.addEventListener) channel.addEventListener("close", hb.close);
   channel.onmessage = (m) => {
     if (typeof m.data === "string") {
       const msg = JSON.parse(m.data);
+      hb.seen(msg.t === "hb");
+      if (msg.t === "hb") return;
       if (msg.size) incoming = { msg, bytes: new Uint8Array(msg.size), got: 0 };
       else onMessage(msg);
       return;
     }
+    hb.seen(false);
     if (!incoming) return;
     incoming.bytes.set(new Uint8Array(m.data), incoming.got);
     incoming.got += m.data.byteLength;
@@ -41,10 +52,11 @@ export function channelIO(channel, onMessage) {
           channel.bufferedAmountLowThreshold = 256 * 1024;
           channel.addEventListener("bufferedamountlow", resolve, { once: true });
         });
+  const send = (msg) => {
+    if (open()) channel.send(JSON.stringify(msg));
+  };
   return {
-    send(msg) {
-      if (open()) channel.send(JSON.stringify(msg));
-    },
+    send,
     async sendBytes(msg, bytes) {
       if (!open()) return;
       channel.send(JSON.stringify({ ...msg, size: bytes.length }));
@@ -53,7 +65,19 @@ export function channelIO(channel, onMessage) {
         channel.send(bytes.subarray(i, i + CHUNK));
       }
     },
+    armHeartbeat: hb.arm,
+    close: hb.close,
+    heartbeat: hb,
   };
+}
+
+// The lockstep for the running player: native when a native session is active (window.nbNative),
+// EmulatorJS otherwise. `target` is the EmulatorJS instance, or the plugin for a native guest whose
+// page has not published nbNative yet.
+export function createLockstep(target, io, isHost, onWait, options) {
+  const plugin = globalThis.window?.nbNative?.plugin || (target && typeof target.lockstepStart === "function" ? target : null);
+  if (plugin) return new LockstepNative(plugin, io, isHost, onWait, options);
+  return new Lockstep(target, io, isHost, onWait);
 }
 
 // Hashes a savestate, skipping the bytes a load does not restore (e.g. a core's running cycle
@@ -284,3 +308,5 @@ export class Lockstep {
     this.restart();
   }
 }
+
+export { Lockstep as LockstepEJS };
