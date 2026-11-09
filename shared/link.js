@@ -11,7 +11,7 @@ import { App } from "@capacitor/app";
 import { registerPlugin } from "@capacitor/core";
 import { t } from "./i18n.js";
 import { packPeer, unpackPeer, peerToLong, peerFromLong } from "../native/agents/fable/js/peer-block.js";
-import { rankLanIps, rankCandidates, sendToInbox } from "../native/agents/fable/js/pair-net.js";
+import { rankLanIps, rankCandidates, sendToInbox, parseInboxLine } from "../native/agents/fable/js/pair-net.js";
 
 const PREFIX = "NB1:";
 
@@ -238,13 +238,17 @@ const isCode = (text) => text.startsWith(PREFIX) || /^NB[23]:/i.test(text);
 // connects and writes "<host ICE ufrag> <answer code>". The ufrag keeps stray connections out.
 const PairInbox = registerPlugin("PairInbox");
 
+// The same plugin proxy for the native TCP channel (opus-5-5/js/tcp-channel.js, NETPLAY.md §12); a
+// second registerPlugin("PairInbox") would only warn and hand back this one. null off native.
+export const pairInbox = () => (native() ? PairInbox : null);
+
 // Calls onAnswer(ufrag, code) for each answer that arrives. Resolves to { info, stop }, where info
 // is { ips, port } for the offer, or null without the plugin (web) or when it could not listen.
 export async function listenForAnswer(onAnswer) {
   if (!native()) return { info: null, stop() {} };
   const sub = await PairInbox.addListener("message", ({ text }) => {
-    const [ufrag, code] = String(text).split(" ");
-    if (code && isCode(code)) onAnswer(ufrag, code);
+    const line = parseInboxLine(text);
+    if (line) onAnswer(line.ufrag, line.code);
   });
   const stop = () => {
     sub.remove();

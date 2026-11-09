@@ -10,6 +10,8 @@ import { fakePlugin } from "./fake-plugin.mjs";
 
 const native = (over = {}) => ({ backend: BACKEND_NATIVE, system: "snes", coreVersion: "642d1d1", appVersion: "1.4.0+96", ...over });
 const ejs = (over = {}) => ({ backend: BACKEND_EJS, system: "snes", coreVersion: "", appVersion: "", ...over });
+// What the decoders return for a block: the same fields plus the tcp flag (NETPLAY.md §12.2).
+const decoded = (p) => ({ ...p, tcp: !!p.tcp });
 
 // The tail of a compact code as today's encoder writes it after the candidates: the inbox block.
 const inboxBlock = (ips, port) => [ips.length, ...ips.flatMap((ip) => ip.split(".").map(Number)), port >> 8, port & 255];
@@ -47,7 +49,7 @@ function newDecoderTail(bytes, i) {
   return { inbox, peer };
 }
 
-test("tag byte is 0x50 + version (0x51 for v1); block is backend, system, 7-byte core, app", () => {
+test("tag byte is 0x50 + version (0x51 for v1); block is backend, system, 7-byte core, app, flags", () => {
   const b = packPeer(native());
   assert.equal(b[0], 0x51);
   assert.equal(PEER_TAG + PEER_VERSION, 0x51);
@@ -55,7 +57,10 @@ test("tag byte is 0x50 + version (0x51 for v1); block is backend, system, 7-byte
   assert.equal(b[2], systemCode("snes"));
   assert.equal(String.fromCharCode(...b.slice(3, 10)), "642d1d1");
   assert.equal(b[10], "1.4.0+96".length);
-  assert.equal(b.length, 11 + "1.4.0+96".length);
+  assert.equal(b.length, 12 + "1.4.0+96".length); // + 1 flags byte (§12.2), always written
+  assert.equal(b[b.length - 1], 0);
+  const withTcp = packPeer(native({ tcp: true }));
+  assert.equal(withTcp[withTcp.length - 1], 1);
 });
 
 test("pack/unpack round-trip, short and long core versions, unknown system", () => {
@@ -77,7 +82,11 @@ test("unpackPeer: wrong tag or truncated block → null", () => {
   assert.equal(unpackPeer(Uint8Array.from([0x52, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0]), 0), null);
   const b = packPeer(native());
   assert.equal(unpackPeer(Uint8Array.from(b.slice(0, 10)), 0), null); // no appLen byte
-  assert.equal(unpackPeer(Uint8Array.from(b.slice(0, -1)), 0), null); // app string cut
+  assert.equal(unpackPeer(Uint8Array.from(b.slice(0, -2)), 0), null); // app string cut
+  // Without the flags byte it is a block from the encoder before §12.2: valid, tcp false.
+  const old = unpackPeer(Uint8Array.from(b.slice(0, -1)), 0);
+  assert.equal(old.end, b.length - 1);
+  assert.equal(old.peer.tcp, false);
   assert.equal(unpackPeer(Uint8Array.from([]), 0), null);
 });
 
@@ -86,14 +95,14 @@ test("an invite without an inbox still carries the inbox block (0 IPs, port 0) b
   assert.deepEqual([...tail.slice(0, 3)], [0, 0, 0]);
   const r = newDecoderTail(tail, 0);
   assert.equal(r.inbox, null); // no addresses: the guest falls back to the QR answer
-  assert.deepEqual(r.peer, native());
+  assert.deepEqual(r.peer, decoded(native()));
 });
 
 test("inbox with addresses followed by the peer block decodes both", () => {
   const tail = Uint8Array.from([...inboxBlock(["192.168.1.5", "10.0.0.2"], 40123), ...packPeer(native())]);
   const r = newDecoderTail(tail, 0);
   assert.deepEqual(r.inbox, { ips: ["192.168.1.5", "10.0.0.2"], port: 40123 });
-  assert.deepEqual(r.peer, native());
+  assert.deepEqual(r.peer, decoded(native()));
 });
 
 test("old decoder compatibility: it reads the inbox and ignores the peer block without error", () => {
@@ -110,10 +119,11 @@ test("old invite (no block at all, or inbox only) → peer null = old EJS phone"
   assert.deepEqual(r.inbox, { ips: ["192.168.1.5"], port: 1 });
 });
 
-test("long form p: { b, s, c, a } round-trips; missing p → null", () => {
-  assert.deepEqual(peerToLong(native()), { b: 1, s: "snes", c: "642d1d1", a: "1.4.0+96" });
-  assert.deepEqual(peerFromLong(peerToLong(native())), native());
-  assert.deepEqual(peerFromLong(peerToLong(ejs())), ejs());
+test("long form p: { b, s, c, a, f } round-trips; missing p → null", () => {
+  assert.deepEqual(peerToLong(native()), { b: 1, s: "snes", c: "642d1d1", a: "1.4.0+96", f: 0 });
+  assert.deepEqual(peerFromLong(peerToLong(native())), decoded(native()));
+  assert.deepEqual(peerFromLong(peerToLong(ejs())), decoded(ejs()));
+  assert.deepEqual(peerFromLong({ b: 1, s: "snes", c: "642d1d1", a: "1.4.0+96" }), decoded(native())); // before §12.2: no f
   assert.equal(peerFromLong(undefined), null);
   assert.equal(peerFromLong("x"), null);
 });
