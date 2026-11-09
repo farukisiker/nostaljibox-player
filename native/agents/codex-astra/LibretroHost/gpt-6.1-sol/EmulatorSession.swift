@@ -19,9 +19,11 @@ public final class EmulatorSession {
     private var renderer: MetalRenderer?
     private var clock: FrameClock?
     private var input: InputSource?
-    private let buttons = UnsafeMutablePointer<UInt16>.allocate(capacity: 1)
+    private let buttons = UnsafeMutablePointer<UInt16>.allocate(capacity: 2)
     private var storage: SaveStoring?
     private var romHash = ""
+    private var coreVersion = ""
+    private var persistSRAM = true
     private var gameId = ""
     private var savedRAM: Data?
     private var pauses = PauseCoordinator()
@@ -63,7 +65,7 @@ public final class EmulatorSession {
         ready.wait()
         loop = captured
         worker = thread
-        buttons.initialize(to: 0)
+        buttons.initialize(repeating: 0, count: 2)
     }
 
     private func enqueue(_ action: @escaping () -> Void) {
@@ -90,11 +92,14 @@ public final class EmulatorSession {
     }
 
     public func start(coreURL: URL, romURL: URL, romHash: String, gameId: String = "", storage: SaveStoring,
+                      coreVersion: String = "", persistSRAM: Bool = true,
                       input: InputSource? = nil, renderer: MetalRenderer? = nil,
                       completion: @escaping (Result<[String: Any], Error>) -> Void) {
         enqueue { [self] in
             if core != nil { _ = teardown(reason: "user") }
             self.storage = storage; self.romHash = romHash
+            self.coreVersion = coreVersion; self.persistSRAM = persistSRAM
+            buttons[0] = 0; buttons[1] = 0
             self.gameId = gameId.isEmpty ? romHash : gameId
             self.input = input; self.renderer = renderer
             do {
@@ -103,12 +108,12 @@ public final class EmulatorSession {
                 core = loaded
                 try loaded.loadGame(path: romURL.path)
                 loaded.setInputPointer(UnsafePointer(buttons))
-                if let memory = loaded.saveRAM(), let saved = storage.loadSRAM(romHash: romHash) {
+                if persistSRAM, let memory = loaded.saveRAM(), let saved = storage.loadSRAM(romHash: romHash) {
                     saved.withUnsafeBytes { bytes in
                         if let base = bytes.baseAddress { memory.baseAddress?.copyMemory(from: base, byteCount: min(memory.count, bytes.count)) }
                     }
                 }
-                savedRAM = loaded.saveRAM().map { Data($0) }
+                savedRAM = persistSRAM ? loaded.saveRAM().map { Data($0) } : nil
                 let av = loaded.avInfo
                 let rate = av.timing.fps
                 guard rate.isFinite, rate > 0, av.timing.sample_rate.isFinite, av.timing.sample_rate > 0 else {
@@ -160,6 +165,8 @@ public final class EmulatorSession {
         core?.setInputPointer(nil)
         core?.unloadGame(); core?.deinitCore(); core = nil
         input = nil; storage = nil; gameId = ""; savedRAM = nil; geometry = [:]
+        coreVersion = ""; persistSRAM = true
+        buttons[0] = 0; buttons[1] = 0
         pauses.end()
         if existed { emit("stopped", ["reason": reason]) }
         return saved
@@ -379,7 +386,12 @@ public final class EmulatorSession {
         return g.aspect_ratio > 0 ? Double(g.aspect_ratio) : Double(g.base_width) / Double(max(1, g.base_height))
     }
     private func runFrame() {
-        buttons.pointee = input?.snapshot(port: 0).buttons ?? 0
+        runFrame(port0: input?.snapshot(port: 0) ?? InputSnapshot(),
+                 port1: input?.snapshot(port: 1) ?? InputSnapshot())
+    }
+    /// Explicit snapshots let lockstep apply both peers without polling the local pad again.
+    private func runFrame(port0: InputSnapshot, port1: InputSnapshot) {
+        buttons[0] = port0.buttons; buttons[1] = port1.buttons
         core?.run(); frame += 1
     }
     private func renderFrame() {
@@ -425,7 +437,7 @@ public final class EmulatorSession {
         return saved
     }
     @discardableResult private func saveSRAM() -> Bool {
-        guard let memory = core?.saveRAM(), let storage = storage else { return false }
+        guard persistSRAM, let memory = core?.saveRAM(), let storage = storage else { return false }
         let data = Data(memory)
         guard data != savedRAM else { return false }
         do { try storage.saveSRAM(data, romHash: romHash); savedRAM = data; return true }
@@ -443,7 +455,7 @@ public final class EmulatorSession {
             retiredAudio?.stop(); retiredAudio = nil
             oldRenderer?.shutdown()
             oldCore?.setInputPointer(nil); oldCore?.deinitCore()
-            pointer.deinitialize(count: 1); pointer.deallocate()
+            pointer.deinitialize(count: 2); pointer.deallocate()
             CFRunLoopStop(ownerLoop)
         }
         CFRunLoopWakeUp(ownerLoop)

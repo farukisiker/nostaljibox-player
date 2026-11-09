@@ -46,3 +46,17 @@ serialized on the session's core Thread/RunLoop; UIKit and plugin results/events
 NativeZip belongs to Gemini. Plugin conditionally imports NativeZip, NativeInput and NativeSaves.
 No agent edits Package.swift, workflows, or another model's folder. Existing source needing replacement
 is reported to lead first so duplicate Swift declarations are not introduced.
+
+## N0 native two-phone play (2026-11-09 12:59)
+M2 is shipped in TestFlight 98 per architect; prior pending M2 rows are historical.
+Baseline f646b22 includes reviewed Fable JS. Build-95 refs remain frozen.
+| Package | Model | Agent | Files | Status | % | ETA | Resume |
+|---|---|---|---|---|---:|---|---|
+| N0-b C ports | gpt-6-sol | /root/sol6_n0_bridge | LibretroC/gpt-6-sol/ | implementing | 20 | 13:10 | followup_task same agent |
+| N0-b session | gpt-6.1-sol | /root/sol_n0 | LibretroHost/gpt-6.1-sol/, Tests/gpt-6.1-sol/ | implementing | 20 | 13:10 | followup_task same agent |
+| N0-c driver | gpt-6.1-sol | /root/sol_n0 | same folders | next | 0 | 13:35 | followup_task same agent |
+| N0-d plugin | gpt-6.1-terra | pending | NativePlayerPlugin/gpt-6.1-terra/ | queued after b | 0 | 13:35 | pending |
+| N0-h determinism | gpt-6-luna | pending | Tests/gpt-6-luna/ | queued | 0 | 13:50 | pending |
+| N1-a / route review | gpt-6.1-sol | pending | model folders | after N0 | 0 | TBD | pending |
+
+N0-b reviewed 13:02: two-slot bridge GCC warning-clean harness passed; session diff checked, Swift regression awaiting CI. Requesting checkpoint; source exclusion automatic in Package.swift.

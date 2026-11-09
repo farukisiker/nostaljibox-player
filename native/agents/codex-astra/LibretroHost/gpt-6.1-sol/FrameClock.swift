@@ -38,6 +38,8 @@ final class FrameClock: NSObject {
         }
         link?.isPaused = false
     }
+    /// Drop accumulated catch-up after a lockstep wait; call on the owning core RunLoop.
+    func resetDebt() { debt.reset() }
     func pause() { link?.isPaused = true; debt.reset() }
     func stop() { link?.invalidate(); link = nil; debt.reset() }
     @objc private func fired(_ display: CADisplayLink) { tick(debt.frames(at: display.timestamp)) }

@@ -89,6 +89,15 @@ final class EmulatorSessionTests: XCTestCase {
         XCTAssertEqual(debt.frames(at: 30), 0)
         XCTAssertEqual(debt.frames(at: 30 + 1.0 / 60), 1)
     }
+    func testWaitResetDiscardsFractionalDebtAndWaitDuration() {
+        var debt = FrameDebt(fps: 60)
+        XCTAssertEqual(debt.frames(at: 1), 0)
+        XCTAssertEqual(debt.frames(at: 1.012), 0) // 0.72 of a frame pending
+        debt.reset() // remote input missing; do not catch up the time spent waiting
+        XCTAssertEqual(debt.frames(at: 2), 0)
+        XCTAssertEqual(debt.frames(at: 2.008), 0) // old fraction must not survive
+        XCTAssertEqual(debt.frames(at: 2 + 1.0 / 60), 1)
+    }
     func testPALAndFractionalRates() {
         for rate in [50.0, 59.94, 60.0988] {
             var debt = FrameDebt(fps: rate)
