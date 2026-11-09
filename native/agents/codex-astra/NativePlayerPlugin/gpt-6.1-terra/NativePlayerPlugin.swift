@@ -18,7 +18,7 @@ import NativeZip
 public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "NativePlayerPlugin"
     public let jsName = "NativePlayer"
-    public let pluginMethods: [CAPPluginMethod] = ["isAvailable", "hasRom", "start", "stop", "pause", "resume", "reset", "saveState", "loadState", "listStates", "getStateBase64", "loadStateBase64", "setPadVisible", "setPadEnabled", "setScaling", "setOption", "setStatsVisible", "getStats", "deleteGame", "lockstepStart", "lockstepStop", "lockstepHold"].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) } + [CAPPluginMethod(name: "pushRemoteInputs", returnType: CAPPluginReturnNone)]
+    public let pluginMethods: [CAPPluginMethod] = ["isAvailable", "hasRom", "start", "stop", "pause", "resume", "reset", "saveState", "loadState", "listStates", "getStateBase64", "loadStateBase64", "setPadVisible", "setPadEnabled", "setScaling", "setOption", "setStatsVisible", "getStats", "deleteGame", "lockstepStart", "lockstepStop", "lockstepHold"].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) } + [CAPPluginMethod(name: "pushRemoteInputs", returnType: CAPPluginReturnNone), CAPPluginMethod(name: "lockstepNoteDesync", returnType: CAPPluginReturnNone)]
     private struct CoreEntry: Decodable { let systems: [String]
         let framework: String
         let version: String }
@@ -409,6 +409,14 @@ public class NativePlayerPlugin: CAPPlugin, CAPBridgedPlugin {
               let values = masks(options["masks"]), values.count <= Int.max - from else { return }
         DispatchQueue.main.async {
             self.session?.pushRemoteInputs(epoch: epoch, from: from, masks: values, bridgeEnteredAt: entered)
+        }
+    }
+    @objc func lockstepNoteDesync(_ call: CAPPluginCall) {
+        let entered = ProcessInfo.processInfo.systemUptime
+        let options = call.options ?? [:]
+        guard let epoch = integer(options["epoch"]), let frame = integer(options["frame"]) else { return }
+        DispatchQueue.main.async {
+            self.session?.lockstepNoteDesync(epoch: epoch, frame: frame, bridgeEnteredAt: entered)
         }
     }
     private func rejectStateError(_ call: CAPPluginCall, _ error: Error) {

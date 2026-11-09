@@ -334,6 +334,14 @@ public final class EmulatorSession {
             }
         }
     }
+    public func lockstepNoteDesync(epoch: Int, frame: Int,
+                                   bridgeEnteredAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        enqueue { [self] in
+            recordBridge(bridgeEnteredAt)
+            lockstep.noteDesync(epoch: epoch, frame: frame,
+                                emit: { [self] name, payload in emit(name, payload) })
+        }
+    }
     private func checksum() -> String {
         let bytes: Data
         if let memory = nb_bridge_memory_data(UInt32(RETRO_MEMORY_SYSTEM_RAM)),
@@ -461,7 +469,7 @@ public final class EmulatorSession {
          "frame": frame, "thermalState": MemoryStats.thermalState,
          "targetFps": targetFps, "linkHz": linkHz, "coreMs": coreMs, "uploadMs": uploadMs,
          "lockstepFrame": lockstep.frame, "lockstepWaitPct": lockstepWaitPct,
-         "lockstepBridgeMs": lockstepBridgeMs, "desyncs": 0]
+         "lockstepBridgeMs": lockstepBridgeMs, "desyncs": lockstep.desyncs]
     }
     private func aspect() -> Double {
         guard let g = core?.avInfo.geometry else { return 1 }

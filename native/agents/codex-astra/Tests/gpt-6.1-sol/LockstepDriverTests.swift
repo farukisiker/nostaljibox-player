@@ -124,6 +124,39 @@ final class LockstepDriverTests: XCTestCase {
         }
         XCTAssertEqual(checks, [60]); XCTAssertEqual(hashes, 1)
     }
+    func testDesyncReportsValidateEpochFrameDeduplicateAndReset() throws {
+        var driver = LockstepDriver()
+        var events: [[String: Any]] = []
+        let emit: (String, [String: Any]) -> Void = { name, payload in
+            if name == "lockstepState" { events.append(payload) }
+        }
+        driver.noteDesync(epoch: 1, frame: 60, emit: emit) // inactive
+        let configuration = try LockstepConfiguration(role: 0, epoch: 1, applied: [0, 0],
+                                                       delay: 1, batch: 1, checkEvery: 60)
+        driver.start(configuration)
+        driver.push(epoch: 1, from: 1, masks: Array(repeating: 0, count: 120))
+        for _ in 0..<60 {
+            _ = driver.advance(count: 2, producing: true, now: 0, sample: { 0 },
+                               run: { _, _ in }, checksum: { "hash" }, emit: emit)
+        }
+        for (epoch, frame) in [(0, 60), (2, 60), (1, -1), (1, 0), (1, 180), (1, 61), (Int.max, Int.max)] {
+            driver.noteDesync(epoch: epoch, frame: frame, emit: emit)
+        }
+        XCTAssertEqual(driver.desyncs, 0); XCTAssertTrue(events.isEmpty)
+        driver.noteDesync(epoch: 1, frame: 120, emit: emit)
+        driver.noteDesync(epoch: 1, frame: 60, emit: emit) // reordered unique report counts
+        driver.noteDesync(epoch: 1, frame: 120, emit: emit)
+        XCTAssertEqual(driver.desyncs, 2)
+        XCTAssertEqual(events.map { $0["desyncs"] as! Int }, [1, 2])
+        XCTAssertEqual(events.last?["frame"] as? Int, 120)
+        XCTAssertEqual(events.last?["waiting"] as? Bool, false)
+        driver.start(configuration)
+        XCTAssertEqual(driver.desyncs, 0)
+        driver.noteDesync(epoch: 1, frame: 60, emit: emit) // old report is ahead of new frame zero
+        XCTAssertEqual(driver.desyncs, 0)
+        driver.stop(); driver.stop()
+        XCTAssertEqual(driver.desyncs, 0)
+    }
     func testMalformedRemotePacketsCannotOverflowOrSatisfyGate() throws {
         var driver = LockstepDriver()
         try driver.start(config(delay: 1, batch: 1))

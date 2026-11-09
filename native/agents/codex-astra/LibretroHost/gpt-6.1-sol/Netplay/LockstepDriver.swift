@@ -19,6 +19,8 @@ struct LockstepDriver {
     private(set) var hold = false
     private(set) var frame = 0
     private(set) var waits = 0
+    private(set) var desyncs = 0
+    private var desyncFrames = Set<Int>()
     private(set) var waiting = false
     private var waitingSince: TimeInterval?
     private var local: [Int: UInt16] = [:]
@@ -34,7 +36,8 @@ struct LockstepDriver {
 
     mutating func setHold(_ value: Bool) { hold = value }
     mutating func start(_ config: LockstepConfiguration) {
-        configuration = config; frame = 0; waits = 0; waiting = false; waitingSince = nil
+        configuration = config; frame = 0; waits = 0; desyncs = 0; desyncFrames.removeAll()
+        waiting = false; waitingSince = nil
         local.removeAll(); remote = futureEpoch == config.epoch ? future : [:]
         future.removeAll(); futureEpoch = nil; batchMasks.removeAll(); batchFrom = config.delay
     }
@@ -63,7 +66,16 @@ struct LockstepDriver {
         batchMasks.removeAll(keepingCapacity: true)
     }
     private func state(_ value: Bool, emit: (String, [String: Any]) -> Void) {
-        emit("lockstepState", ["waiting": value, "frame": frame, "waits": waits, "desyncs": 0])
+        emit("lockstepState", ["waiting": value, "frame": frame, "waits": waits, "desyncs": desyncs])
+    }
+    /// JS compares peer hashes; only reports for already simulated frames of this epoch count.
+    mutating func noteDesync(epoch incoming: Int, frame reported: Int,
+                             emit: (String, [String: Any]) -> Void) {
+        guard active, incoming == epoch, reported > 0, reported <= frame,
+              let config = configuration, reported % config.checkEvery == 0,
+              desyncFrames.insert(reported).inserted else { return }
+        desyncs += 1
+        state(waiting, emit: emit)
     }
     /// Returns actual runs, permitting the session to account for partial ticks accurately.
     mutating func advance(count: Int, producing: Bool, now: TimeInterval,
