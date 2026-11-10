@@ -10,6 +10,8 @@ import { bootNativeGuest, stopNativeGuest } from "../native/agents/fable/js/nati
 import "../native/agents/sonnet-5-5/native.css";
 import "../native/agents/gemini-argon/js/native-menu.js";
 import "../native/agents/gemini-argon/js/native-menu.css";
+import { adHook } from "./ad-hook.js";
+import { playClock } from "../native/agents/sonnet-5-5/js/play-clock.js";
 import { installPausedHint } from "../native/agents/fable/js/paused-hint.js";
 
 translatePage();
@@ -129,6 +131,29 @@ function fail(msg) {
   errorEl.classList.remove("hidden");
 }
 
+// Single-player pause ad (NETPLAY.md §13.2): the menu pauses the game first, then the app's hook
+// may show an ad; the game stays paused and the menu open. Never while linked. The 12-minute
+// threshold is the app's; here only the in-session play time is counted and handed over.
+const clock = playClock();
+let gating = false;
+async function pauseGate() {
+  if (!adHook.supported || gating || document.body.classList.contains("linked")) return;
+  gating = true;
+  try {
+    const r = await adHook.gate("pause", { playMs: clock.ms() });
+    if (r && r.shown) clock.reset();
+  } catch {
+    // the hook never throws; stay safe anyway
+  } finally {
+    gating = false;
+  }
+}
+// native-menu.js listens first (it is imported above), so the menu is open and paused by now.
+document.addEventListener("nb:native-menu", () => {
+  const el = document.getElementById("native-menu");
+  if (el && !el.hidden && !el.classList.contains("hidden")) pauseGate();
+});
+
 // One button at the top centre opens a panel with the toolbar's actions, so a stray tap during
 // play can't leave the game or end two-phone play.
 const toolsPanel = document.getElementById("tools-panel");
@@ -147,7 +172,14 @@ document.getElementById("back").addEventListener("click", () => {
 // EmulatorJS's own bottom menu bar; its corner button is hidden in play.css.
 document.getElementById("emu-menu").addEventListener("click", () => {
   const emu = window.EJS_emulator;
-  if (emu && emu.menu) emu.menu.toggle();
+  if (!emu || !emu.menu) return;
+  emu.menu.toggle();
+  const bar = emu.elements && emu.elements.menu;
+  const open = !!bar && !bar.classList.contains("ejs_menu_bar_hidden");
+  if (open && !document.body.classList.contains("linked")) {
+    if (emu.pause) emu.pause();
+    pauseGate();
+  }
 });
 
 async function lockOrientation(core) {
@@ -208,6 +240,7 @@ function boot(game, rom, onStart, gameId = id) {
       const emu = window.EJS_emulator;
       if (BROKEN_SHADERS.includes(emu.getSettingValue("shader"))) emu.changeSettingOption("shader", "sabr");
       bindComboButton(emu);
+      clock.start();
       if (onStart) onStart(emu);
       autoOpenHostLink({ params });
     },
@@ -260,7 +293,10 @@ if (params.has("join") && reloaded) {
     if (!game || !rom) return fail(t("gameNotFound"));
     put("games", id, { ...game, played: Date.now() }).catch(() => {});
     current = { game, rom }; // the host link needs the ROM in native mode too (boot() is not called then)
-    if (await installNativeMode({ params, game, rom, PADS, lockOrientation, bootEmulator: () => boot(game, rom) })) return;
+    if (await installNativeMode({ params, game, rom, PADS, lockOrientation, bootEmulator: () => boot(game, rom) })) {
+      clock.start();
+      return;
+    }
     boot(game, rom);
   })().catch((e) => fail(t("error", { msg: e.message || e })));
 }

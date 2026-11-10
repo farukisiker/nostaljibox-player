@@ -53,7 +53,9 @@ export function setupGuestLink(boot, hooks = {}) {
 
   function leave(msg) {
     toast(msg);
-    setTimeout(() => (location.href = "../index.html"), 2500);
+    // Only a link that ran a game goes back as "from the game" (the library then shows the exit ad).
+    const url = played ? "../index.html?from=game" : "../index.html";
+    setTimeout(() => (location.href = url), 2500);
   }
 
   // Every end of the link: lockstep off (native: lockstepStop), timers off, then the library.
@@ -90,6 +92,7 @@ export function setupGuestLink(boot, hooks = {}) {
   function takeState(msg, bytes) {
     startup.got("state");
     played = true;
+    try { sessionStorage.setItem("nb_game_open", "1"); } catch {}
     sync.onMessage(msg, bytes);
   }
 
