@@ -9,6 +9,9 @@
 //     background or a slow Android process used to wait indefinitely; §10.4 is still open, so the
 //     short limit applies to native pairs only).
 // A tick that comes > 2 s late means this JS was suspended (background); the silence is forgiven once.
+// setPreArmLimit(ms) (NETPLAY.md §13.3): the native pre-arm limit is raised while the two-phone
+// link-start ad gate is open (an ad must not read as a lost link) and set back to 30 s after it.
+// It has no effect on EJS (no pre-arm limit there) or after arm().
 export const HB_INTERVAL_MS = 1000;
 export const HB_ARMED_LIMIT_MS = 5000;
 export const HB_ARMED_EJS_MS = 30000;
@@ -29,11 +32,12 @@ export function createHeartbeat({
   let armed = false;
   let lost = false;
   let timer = null;
+  let preArm = HB_PREARM_NATIVE_MS;
 
   const limit = () => {
     if (!peerBeats) return Infinity;
     if (armed) return native ? HB_ARMED_LIMIT_MS : HB_ARMED_EJS_MS;
-    return native ? HB_PREARM_NATIVE_MS : Infinity;
+    return native ? preArm : Infinity;
   };
   const close = () => {
     if (timer !== null) clearInterval(timer);
@@ -65,6 +69,9 @@ export function createHeartbeat({
     },
     arm() {
       armed = true;
+    },
+    setPreArmLimit(ms = HB_PREARM_NATIVE_MS) {
+      preArm = ms;
     },
     close,
     get active() {

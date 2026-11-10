@@ -3,7 +3,8 @@
 // (never added to the library; the native player keeps a copy on disk under `nostaljibox-link`
 // until the next join, NETPLAY.md §5) and runs it in lockstep as player 2. With a native host that
 // offers it, a native guest connects over the PairInbox TCP channel first (NETPLAY.md §12) and only
-// answers over WebRTC when that fails.
+// answers over WebRTC when that fails. Before the host's state, both phones may show a "link-start"
+// ad (NETPLAY.md §13.3, ad-gate.js); the ad itself is the app's, behind ./ad-hook.js.
 import {
   createPeer, gatheringDone, encodeDescription, decodeDescription, drawQR, openCamera, stopCamera, scanQR,
   shareInvite, pasteCode, findCode, onInviteLink, sendAnswer, pairInbox,
@@ -17,6 +18,8 @@ import { nt } from "../native/agents/fable/js/strings.js";
 import { once, latch } from "../native/agents/fable/js/guards.js";
 import { startGuestGame } from "../native/agents/fable/js/native-guest.js";
 import { hasChannels, openChannel, shouldTryTcp } from "../native/agents/opus-5-5/js/tcp-channel.js";
+import { adGate, gateHeartbeat, LINK_AD_GATE_MAX_MS } from "../native/agents/opus-5-5/js/ad-gate.js";
+import { adHook } from "./ad-hook.js";
 
 const $ = (s) => document.querySelector(s);
 // After the reply went over the Wi-Fi, ICE has this long to connect before the reply is also shown
@@ -41,6 +44,9 @@ export function setupGuestLink(boot, hooks = {}) {
   let startup = null;
   let myPeer = null;
   let native = false;
+  let gate = null; // the link-start ad gate (ad-gate.js), once the host sent adgate
+  let pending = null; // the host's state when it came while the gate was still open
+  let played = false; // the host's state was taken: the game runs (a link lost before is no game)
 
   document.body.classList.add("guest");
   $("#join").classList.remove("hidden");
@@ -53,6 +59,12 @@ export function setupGuestLink(boot, hooks = {}) {
   // Every end of the link: lockstep off (native: lockstepStop), timers off, then the library.
   // Once only: onLost, onclose and ICE "failed" can all fire for the same lost link.
   const end = once((msg) => {
+    // This phone's link-start ad may still be on screen: go back only once it is closed (at most
+    // the gate's cap), so the library does not load under it.
+    const ad = gate ? gate.ownAd : null;
+    if (gate) gate.cancel();
+    gate = null;
+    pending = null;
     if (sync) sync.detach();
     sync = null;
     if (startup) startup.clear();
@@ -60,13 +72,46 @@ export function setupGuestLink(boot, hooks = {}) {
     if (link) link.close(); // the native link outlives the page otherwise
     if (!native && window.EJS_emulator && window.EJS_emulator.pause) window.EJS_emulator.pause();
     if (native && hooks.stopNative) hooks.stopNative(); // the game must not run on alone until the library loads
-    leave(msg);
+    if (!ad) return leave(msg);
+    let timer = null;
+    Promise.race([ad, new Promise((r) => (timer = setTimeout(r, LINK_AD_GATE_MAX_MS)))]).then(() => {
+      clearTimeout(timer);
+      leave(msg);
+    });
   });
 
   // This phone could not start or keep the game: tell the host, then go back.
   function abort(reason, msg) {
     if (io) io.send({ t: "abort", reason });
     end(msg);
+  }
+
+  // The host's state starts the game (the first one) or re-syncs it (N1-b).
+  function takeState(msg, bytes) {
+    startup.got("state");
+    played = true;
+    sync.onMessage(msg, bytes);
+  }
+
+  // The host's adgate (NETPLAY.md §13.3): no "state within 30 s" while the ads run (startup paused,
+  // heartbeat pre-arm limit raised); once both phones' ads are closed (or at the gate's cap) the 30 s
+  // start again and a state that came meanwhile is taken now.
+  function openGate(id) {
+    startup.pause();
+    gateHeartbeat(io, true);
+    gate = adGate({
+      send: (m) => io && io.send(m),
+      gate: (trigger) => adHook.gate(trigger),
+      onDone: () => {
+        if (!sync) return;
+        gateHeartbeat(io, false);
+        startup.resume();
+        const held = pending;
+        pending = null;
+        if (held) takeState(held.msg, held.bytes);
+      },
+    });
+    gate.open(id);
   }
 
   function onChannel(channel) {
@@ -92,7 +137,8 @@ export function setupGuestLink(boot, hooks = {}) {
             };
             sync.attach();
             sync.setHold(true);
-            io.send({ t: "booted" });
+            // `ads: 1`: this phone can show the link-start ad (older hosts ignore the field).
+            io.send({ t: "booted", ...(adHook.supported ? { ads: 1 } : {}) });
             startup.expect("state");
             document.body.classList.add("linked");
             toast(t("youArePlayer2"));
@@ -113,9 +159,15 @@ export function setupGuestLink(boot, hooks = {}) {
         } else if (msg.t === "abort") {
           // The host gave up: after too many resyncs ("unstable"), else as a lost connection.
           end(msg.reason === "unstable" ? nt("unstableLink") : nt("connectionLost"));
+        } else if (msg.t === "adgate") {
+          // Only before the game runs, once (older hosts never send it).
+          if (sync && !played && !gate) openGate(msg.id);
+        } else if (msg.t === "addone") {
+          if (gate) gate.peerDone(msg.id, msg);
         } else if (sync) {
-          if (msg.t === "state") startup.got("state");
-          sync.onMessage(msg, bytes);
+          if (msg.t === "state" && gate && gate.active) pending = { msg, bytes }; // the host's cap came first
+          else if (msg.t === "state") takeState(msg, bytes);
+          else sync.onMessage(msg, bytes);
         }
       },
       { native, onLost: () => end(nt("connectionLost")) },

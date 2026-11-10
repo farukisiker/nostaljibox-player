@@ -72,6 +72,59 @@ test("EJS backend: no timer at all", () => {
   assert.deepEqual(fired, []);
 });
 
+test("pause: the timer stops, nothing fires; resume: the same name, the full time again (§13.3 ad gate)", () => {
+  const { timers, fired, st } = make(true);
+  st.expect("state");
+  timers.advance(20000);
+  st.pause();
+  assert.equal(st.pending, null);
+  assert.equal(st.paused, "state");
+  assert.equal(timers.count, 0);
+  timers.advance(5 * 60000); // a long ad: no timeout while paused
+  assert.deepEqual(fired, []);
+  st.pause(); // a second pause keeps what was awaited
+  assert.equal(st.paused, "state");
+  st.resume();
+  assert.equal(st.pending, "state");
+  assert.equal(st.paused, null);
+  timers.advance(STARTUP_TIMEOUT_MS - 1); // from the resume, not from the first expect
+  assert.deepEqual(fired, []);
+  timers.advance(2);
+  assert.deepEqual(fired, ["state"]);
+});
+
+test("pause/resume: the awaited message during the pause, resume with nothing paused, clear, EJS no-op", () => {
+  const { timers, fired, st } = make(true);
+  st.expect("state");
+  st.pause();
+  st.got("state"); // came while paused: nothing to wait for any more
+  assert.equal(st.paused, null);
+  st.resume();
+  assert.equal(st.pending, null);
+  assert.equal(timers.count, 0);
+  st.resume(); // nothing paused
+  assert.equal(timers.count, 0);
+  st.expect("state");
+  st.pause();
+  st.clear(); // the link ended during the pause
+  st.resume();
+  assert.equal(timers.count, 0);
+  st.expect("ready");
+  st.pause();
+  st.expect("booted"); // a new explicit wait replaces the paused one
+  assert.equal(st.paused, null);
+  assert.equal(st.pending, "booted");
+  timers.advance(STARTUP_TIMEOUT_MS + 1);
+  assert.deepEqual(fired, ["booted"]);
+
+  const ejs = make(false);
+  ejs.st.expect("state");
+  ejs.st.pause();
+  ejs.st.resume();
+  assert.equal(ejs.st.paused, null);
+  assert.equal(ejs.timers.count, 0);
+});
+
 test("strings: English and Turkish, placeholders, language pick (all 13 languages: strings.test.mjs)", () => {
   assert.equal(nt("connectionLost", null, "en"), "Connection lost");
   assert.equal(nt("connectionLost", null, "tr"), "Bağlantı koptu");

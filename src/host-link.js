@@ -4,6 +4,8 @@
 // (EmulatorJS, or the native player on iPhone); the invite says which, and only a guest on the same
 // backend and version is accepted (NETPLAY.md §1.1). Two native iPhones use the PairInbox TCP
 // channel when they can (NETPLAY.md §12, works on a Personal Hotspot); everything else WebRTC.
+// Between the guest's `booted` and the state, both phones may show a "link-start" ad (NETPLAY.md
+// §13.3, ad-gate.js); the ad itself is the app's, behind ./ad-hook.js.
 import {
   createPeer, gatheringDone, encodeDescription, decodeDescription, drawQR, openCamera, stopCamera, scanQR,
   shareInvite, pasteCode, findCode, onInviteLink, listenForAnswer, iceUfrag, pairInbox,
@@ -15,6 +17,8 @@ import { startupTimeout } from "../native/agents/fable/js/startup-timeout.js";
 import { nt } from "../native/agents/fable/js/strings.js";
 import { hostReplyView } from "../native/agents/fable/js/pair-net.js";
 import { hasChannels, acceptChannel } from "../native/agents/opus-5-5/js/tcp-channel.js";
+import { adGate, gateHeartbeat } from "../native/agents/opus-5-5/js/ad-gate.js";
+import { adHook } from "./ad-hook.js";
 
 const $ = (s) => document.querySelector(s);
 const panel = $("#link");
@@ -36,6 +40,7 @@ let sync = null;
 let io = null;
 let startup = null;
 let myPeer = null;
+let gate = null; // the link-start ad gate of this link (ad-gate.js), once the guest booted
 let currentGame = () => null;
 
 export function toast(msg) {
@@ -90,6 +95,8 @@ function hangUp() {
   clearTimeout(connectTimer);
   connectTimer = null;
   answered = false;
+  if (gate) gate.cancel(); // an ad still on screen ends on its own; its result goes nowhere
+  gate = null;
   if (startup) startup.clear();
   startup = null;
   if (sync) sync.detach();
@@ -156,22 +163,47 @@ function linkUp(channel, e, native) {
   document.body.classList.add("linked");
   toast(t("p2Connected"));
   const { game, rom } = currentGame();
+  // The savestate goes out and the guest has 30 s to answer `ready` (native: the lockstep resolves
+  // once the state's last chunk is queued; the EJS resync returns nothing and has no timeout).
+  const sendState = () =>
+    Promise.resolve(sync.resync())
+      .then(() => startup && startup.expect("ready"))
+      .catch(() => {
+        // getStateBase64 or the send failed: don't stay frozen for a ready that cannot come.
+        if (io) io.send({ t: "abort", reason: "state" });
+        toast(nt("guestStartFailed"));
+        hangUp();
+      });
+  // Link-start ad gate (NETPLAY.md §13.3): both phones are frozen and loaded; each shows its own ad,
+  // the state goes out once both are closed (or after LINK_AD_GATE_MAX_MS). No startup timer meanwhile
+  // (the cap is the gate's own limit); the heartbeat's pre-arm limit is raised for the ad.
+  const openGate = () => {
+    gateHeartbeat(io, true);
+    gate = adGate({
+      send: (m) => io && io.send(m),
+      gate: (trigger) => adHook.gate(trigger),
+      onDone: () => {
+        if (!sync) return;
+        gateHeartbeat(io, false);
+        sendState();
+      },
+    });
+    io.send({ t: "adgate", id: 1 }); // one gate per link: always the first
+    gate.open(1);
+  };
   io = channelIO(
     channel,
     (msg, bytes) => {
       if (!sync) return; // a late message after hangUp
       if (msg.t === "booted") {
         startup.got("booted");
-        // The native lockstep resolves once the state's last chunk is queued; then the guest has
-        // 30 s to answer `ready`. The EJS resync returns nothing and has no timeout.
-        Promise.resolve(sync.resync())
-          .then(() => startup && startup.expect("ready"))
-          .catch(() => {
-            // getStateBase64 or the send failed: don't stay frozen for a ready that cannot come.
-            if (io) io.send({ t: "abort", reason: "state" });
-            toast(nt("guestStartFailed"));
-            hangUp();
-          });
+        if (gate && gate.active) return; // a repeated booted while the ads run: the gate sends the state
+        // Only for a guest that can show the ad (`ads: 1`, older guests send no flag), with an ad
+        // hook here, at game start (never for a resync's state; the EJS lockstep counts none).
+        if (msg.ads === 1 && adHook.supported && !(sync.resyncs > 0) && !gate) openGate();
+        else sendState();
+      } else if (msg.t === "addone") {
+        if (gate) gate.peerDone(msg.id, msg);
       } else if (msg.t === "abort") {
         // The guest could not start the game, or could not load a resync's state (or gave up):
         // back to single player here.

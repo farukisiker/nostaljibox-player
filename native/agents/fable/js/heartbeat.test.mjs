@@ -2,7 +2,7 @@
 // Run with: node --test native/agents/fable/js/
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHeartbeat, HB_INTERVAL_MS, HB_ARMED_LIMIT_MS, HB_ARMED_EJS_MS } from "./heartbeat.js";
+import { createHeartbeat, HB_INTERVAL_MS, HB_ARMED_LIMIT_MS, HB_ARMED_EJS_MS, HB_PREARM_NATIVE_MS } from "./heartbeat.js";
 import { fakeTimers } from "./fake-plugin.mjs";
 import { channelIO } from "../../../../src/lockstep.js";
 
@@ -90,6 +90,51 @@ test("arm after the first hb works the same way", () => {
   hb.arm();
   timers.advance(5500);
   assert.equal(lost(), 1);
+});
+
+test("setPreArmLimit(85000) during the ad gate: 40 s of silence is fine, 90 s ends the link (§13.3)", () => {
+  const { timers, hb, lost } = make({ native: true });
+  hb.seen(true);
+  hb.setPreArmLimit(85000);
+  assert.equal(hb.limitMs, 85000);
+  timers.advance(40000);
+  assert.equal(lost(), 0);
+  timers.advance(50000);
+  assert.equal(lost(), 1);
+});
+
+test("setPreArmLimit: back to 30 s after the gate; arm() still means 5 s; EJS has no pre-arm limit", () => {
+  const nat = make({ native: true });
+  nat.hb.seen(true);
+  nat.hb.setPreArmLimit(85000);
+  nat.timers.advance(20000);
+  nat.hb.setPreArmLimit(HB_PREARM_NATIVE_MS); // the gate closed
+  assert.equal(nat.hb.limitMs, 30000);
+  nat.timers.advance(9000);
+  assert.equal(nat.lost(), 0);
+  nat.timers.advance(2000); // 31 s since the last sign of life
+  assert.equal(nat.lost(), 1);
+
+  const armed = make({ native: true });
+  armed.hb.seen(true);
+  armed.hb.setPreArmLimit(85000);
+  armed.hb.arm();
+  assert.equal(armed.hb.limitMs, HB_ARMED_LIMIT_MS);
+  armed.timers.advance(6000);
+  assert.equal(armed.lost(), 1);
+
+  const def = make({ native: true });
+  def.hb.seen(true);
+  def.hb.setPreArmLimit(85000);
+  def.hb.setPreArmLimit(); // no argument: the default 30 s
+  assert.equal(def.hb.limitMs, HB_PREARM_NATIVE_MS);
+
+  const ejs = make({ native: false });
+  ejs.hb.seen(true);
+  ejs.hb.setPreArmLimit(85000);
+  assert.equal(ejs.hb.limitMs, Infinity);
+  ejs.timers.advance(120000);
+  assert.equal(ejs.lost(), 0);
 });
 
 test("own sleep: a tick that comes late forgives the silence once", () => {
