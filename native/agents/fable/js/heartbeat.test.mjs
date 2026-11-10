@@ -137,6 +137,54 @@ test("setPreArmLimit: back to 30 s after the gate; arm() still means 5 s; EJS ha
   assert.equal(ejs.lost(), 0);
 });
 
+test("setGateLimit(85000): an EJS heartbeat armed at boot allows 40 s of silence, 30 s again after the gate", () => {
+  const ejs = make({ native: false });
+  ejs.hb.arm(); // an EJS guest arms at boot, before the host's adgate
+  ejs.hb.seen(true);
+  ejs.hb.setGateLimit(85000);
+  assert.equal(ejs.hb.limitMs, 85000);
+  ejs.timers.advance(40000);
+  assert.equal(ejs.lost(), 0);
+  ejs.hb.seen(false); // the host's addone
+  ejs.hb.setGateLimit(null); // both ads closed
+  assert.equal(ejs.hb.limitMs, HB_ARMED_EJS_MS);
+  ejs.timers.advance(29000);
+  assert.equal(ejs.lost(), 0);
+  ejs.timers.advance(2000);
+  assert.equal(ejs.lost(), 1);
+
+  const silent = make({ native: false });
+  silent.hb.arm();
+  silent.hb.seen(true);
+  silent.hb.setGateLimit(85000);
+  silent.timers.advance(84000);
+  assert.equal(silent.lost(), 0);
+  silent.timers.advance(2000); // 86 s: a dead host is still caught
+  assert.equal(silent.lost(), 1);
+});
+
+test("setGateLimit only raises: native pre-arm 85 s, no limit stays none, arm() on a native pair clears it", () => {
+  const nat = make({ native: true });
+  nat.hb.seen(true);
+  nat.hb.setGateLimit(85000);
+  assert.equal(nat.hb.limitMs, 85000);
+  nat.hb.arm(); // the native game runs: the gate is over
+  assert.equal(nat.hb.limitMs, HB_ARMED_LIMIT_MS);
+  nat.hb.setGateLimit(); // no argument: cleared
+  assert.equal(nat.hb.limitMs, HB_ARMED_LIMIT_MS);
+
+  const ejsPre = make({ native: false });
+  ejsPre.hb.seen(true);
+  ejsPre.hb.setGateLimit(85000);
+  assert.equal(ejsPre.hb.limitMs, Infinity); // an EJS host before ready has no limit; the gate adds none
+
+  const old = make({ native: true });
+  old.hb.setGateLimit(85000);
+  assert.equal(old.hb.limitMs, Infinity); // a peer that never sent hb keeps no limit
+  old.timers.advance(120000);
+  assert.equal(old.lost(), 0);
+});
+
 test("own sleep: a tick that comes late forgives the silence once", () => {
   const { timers, hb, lost } = make({ native: true });
   hb.arm();

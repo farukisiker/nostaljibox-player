@@ -316,10 +316,44 @@ async function guestPage(plugin, end) {
   return calls;
 }
 
+// The guest page on EmulatorJS (an EJS host's invite: Android pairs): `boot` hands over a fake
+// EmulatorJS instance with the surface the EJS lockstep (src/lockstep.js Lockstep) touches.
+const EJS_HOST_PEER = { backend: 0, system: "snes", coreVersion: "", appVersion: "", tcp: false };
+function fakeEmu() {
+  const emu = { loaded: [], pauses: 0 };
+  emu.pause = () => (emu.pauses += 1);
+  emu.gameManager = {
+    functions: { toggleMainLoop: () => {}, getFrameNum: () => 0, simulateInput: () => {}, saveStateInfo: () => "3|0|1" },
+    simulateInput: () => {},
+    toggleMainLoop: () => {},
+    loadState: (bytes) => emu.loaded.push(Array.from(bytes)),
+    Module: { HEAPU8: new Uint8Array(8), _free: () => {} },
+  };
+  return emu;
+}
+async function ejsGuestPage(end, emu) {
+  const calls = { boots: 0 };
+  setupGuestLink((game, rom, onStart) => {
+    calls.boots += 1;
+    win.EJS_emulator = emu;
+    onStart(emu);
+  });
+  await settle();
+  link.offer = { type: "offer", sdp: "a=ice-ufrag:ufrag1", peer: EJS_HOST_PEER, inbox: null, ufrag: "ufrag1" };
+  const before = link.peers.length;
+  await link.scans.get(el("#join-cam"))("NB1:code");
+  await settle();
+  const pc = link.peers[before];
+  assert.ok(pc, "the EJS guest answered over WebRTC");
+  pc.connectionState = "connected";
+  pc.ondatachannel({ channel: end });
+  return calls;
+}
+
 // A scripted phone on the other end of `end`: the real channelIO (ROM/state chunks, heartbeat).
-function scripted(end) {
+function scripted(end, native = true) {
   const got = [];
-  const io = channelIO(end, (msg, bytes) => got.push(bytes ? { ...msg, bytes } : msg), { native: true, onLost: () => got.push({ t: "LOST" }) });
+  const io = channelIO(end, (msg, bytes) => got.push(bytes ? { ...msg, bytes } : msg), { native, onLost: () => got.push({ t: "LOST" }) });
   return { io, got, types: () => got.map((m) => (Array.isArray(m) ? m[0] : m.t)) };
 }
 
@@ -558,12 +592,12 @@ test("guest: a state that comes while its ad is still open (the host's cap) wait
   cleanup();
 });
 
-test("guest: the gate's cap also takes a waiting state when the guest's own ad never reports back", async (t) => {
+test("guest: a held state waits as long as the guest's own ad is open, past the cap; no timeout meanwhile", async (t) => {
   useClock(t);
   ads.guest = fakeAd();
   const plugin = fakePlugin();
   const [a, b] = channelPair();
-  await guestPage(plugin, b);
+  const calls = await guestPage(plugin, b);
   const h = scripted(a);
   await h.io.sendBytes({ t: "rom", ...GAME }, ROM);
   await settle();
@@ -571,8 +605,14 @@ test("guest: the gate's cap also takes a waiting state when the guest's own ad n
   h.io.send({ t: "addone", id: 1, shown: false, reason: "cooldown" });
   await settle();
   await h.io.sendBytes({ t: "state", epoch: 1 }, Uint8Array.from([0, 1, 2]));
-  await advance(LINK_AD_GATE_MAX_MS);
-  assert.deepEqual(h.types(), ["booted", "ready"]);
+  await advance(3 * LINK_AD_GATE_MAX_MS); // the user is in the store page the ad opened
+  assert.deepEqual(h.types(), ["booted"]); // no ready, no abort
+  assert.deepEqual(plugin.loaded, []);
+  assert.equal(plugin.hold, true); // the game stays frozen under the ad
+  assert.equal(calls.stops, 0);
+  ads.guest.close();
+  await settle();
+  assert.deepEqual(h.types(), ["booted", "addone", "ready"]);
   assert.deepEqual(startArgs(plugin).map((s) => s.epoch), [1]);
   cleanup();
 });
@@ -616,16 +656,42 @@ test("host: the guest leaves during the gate → single player again, the ad's l
   b.close();
   await settle();
   assert.equal(document.body.classList.contains("linked"), false);
-  assert.equal(hostPlugin.hold, false); // lockstepStop cleared the hold
+  // The host's ad is still on screen: the game stays frozen under it (no sound, nobody playing).
+  assert.equal(hostPlugin.hold, true);
+  assert.equal(hostPlugin.names().includes("lockstepStop"), false);
+  await advance(30000);
+  assert.equal(hostPlugin.hold, true);
   ads.host.close();
   await settle();
+  assert.equal(hostPlugin.hold, false); // now lockstepStop: single player goes on
+  assert.equal(hostPlugin.stopped, 1);
   await advance(LINK_AD_GATE_MAX_MS);
   assert.equal(sentTypes(a).includes("addone"), false);
   assert.equal(hostPlugin.names().includes("getStateBase64"), false);
   cleanup();
 });
 
-test("host: the heartbeat allows 85 s of silence while the gate is open, 30 s again after it", async (t) => {
+test("host: the guest leaves after the host's own ad closed → single player at once", async (t) => {
+  useClock(t);
+  ads.host = fakeAd({ mode: "cooldown" });
+  const hostPlugin = fakePlugin();
+  const [a, b] = channelPair();
+  const host = await hostPage(hostPlugin, a);
+  const g = scripted(b);
+  host.open();
+  await settle();
+  g.io.send({ t: "booted", ads: 1 });
+  await settle();
+  assert.deepEqual(g.types(), ["rom", "adgate", "addone"]);
+  assert.equal(hostPlugin.hold, true); // waiting for the guest's ad
+  b.close();
+  await settle();
+  assert.equal(hostPlugin.hold, false);
+  assert.equal(hostPlugin.stopped, 1);
+  cleanup();
+});
+
+test("host: the heartbeat allows 85 s of silence while the guest's addone is missing, also past the cap", async (t) => {
   useClock(t);
   ads.host = fakeAd();
   const hostPlugin = fakePlugin();
@@ -642,12 +708,17 @@ test("host: the heartbeat allows 85 s of silence while the gate is open, 30 s ag
   await settle();
   await advance(60000); // 60 s > the usual 30 s pre-arm limit: still linked
   assert.equal(document.body.classList.contains("linked"), true);
-  await advance(LINK_AD_GATE_MAX_MS - 60000 + 3000); // the gate's cap: limit back to 30 s, silence already longer
+  await advance(18000); // past the cap: the state went out, the ready timer waits for the guest's addone
+  assert.equal(document.body.classList.contains("linked"), true);
+  assert.deepEqual(g.types().filter((x) => x !== "hb"), ["rom", "adgate", "addone", "state"]);
+  assert.equal(sentTypes(a).includes("abort"), false);
+  await advance(9000); // 87 s of silence > 85 s: a dead guest is caught
   assert.equal(document.body.classList.contains("linked"), false);
+  assert.equal(hostPlugin.hold, false);
   cleanup();
 });
 
-test("guest: the heartbeat allows the host's silence during the gate (60 s), not after it", async (t) => {
+test("guest: the heartbeat allows the host's silence during the gate, also past the cap while its ad is open; 85 s ends it", async (t) => {
   useClock(t);
   ads.guest = fakeAd();
   const plugin = fakePlugin();
@@ -661,7 +732,105 @@ test("guest: the heartbeat allows the host's silence during the gate (60 s), not
   h.io.heartbeat.close(); // the host goes silent
   await advance(60000);
   assert.equal(calls.stops, 0);
-  await advance(LINK_AD_GATE_MAX_MS - 60000 + 3000); // cap → 30 s limit → lost
+  await advance(20000); // 80 s: past the cap, the limit is still the gate's
+  assert.equal(calls.stops, 0);
+  await advance(7000); // 87 s of silence > 85 s → lost
   assert.equal(calls.stops, 1);
+  cleanup();
+});
+
+test("host cooldown, the guest's ad open past the cap: the state goes out at the cap, the 30 s for ready only after the guest's addone", async (t) => {
+  useClock(t);
+  ads.host = fakeAd({ mode: "cooldown" });
+  ads.guest = fakeAd();
+  const hostPlugin = fakePlugin();
+  const guestPlugin = fakePlugin();
+  const [a, b] = channelPair();
+  const host = await hostPage(hostPlugin, a);
+  const guest = await guestPage(guestPlugin, b);
+  host.open();
+  await settle();
+  await advance(LINK_AD_GATE_MAX_MS + 1000);
+  assert.ok(hostPlugin.names().includes("getStateBase64")); // the cap: the state went out
+  assert.deepEqual(guestPlugin.loaded, []); // and waits on the guest, whose ad is on screen
+  await advance(LINK_AD_GATE_MAX_MS); // 150 s in: nobody gives up (both phones' heartbeats run)
+  assert.equal(sentTypes(a).includes("abort"), false);
+  assert.equal(sentTypes(b).includes("abort"), false);
+  assert.equal(guest.stops, 0);
+  assert.equal(hostPlugin.hold, true);
+  assert.equal(guestPlugin.hold, true);
+  assert.equal(startArgs(guestPlugin).length, 0);
+  ads.guest.close();
+  await settle();
+  assert.deepEqual(guestPlugin.loaded, ["AAEC"]);
+  assert.deepEqual(startArgs(hostPlugin).map((s) => s.epoch), [1]);
+  assert.deepEqual(startArgs(guestPlugin).map((s) => s.epoch), [1]);
+  assert.deepEqual(sentTypes(a).filter((x) => x !== "i" && x !== "h"), ["rom", "adgate", "addone", "state"]);
+  assert.deepEqual(sentTypes(b).filter((x) => x !== "i" && x !== "h"), ["booted", "addone", "ready"]);
+  await advance(40000); // the game runs: no late ready timeout
+  assert.equal(sentTypes(a).includes("abort"), false);
+  assert.equal(document.body.classList.contains("linked"), true);
+  cleanup();
+});
+
+test("the host's own ad open past the cap: no state until it closes, the guest waits without a timeout", async (t) => {
+  useClock(t);
+  ads.host = fakeAd();
+  ads.guest = fakeAd({ mode: "cooldown" });
+  const hostPlugin = fakePlugin();
+  const guestPlugin = fakePlugin();
+  const [a, b] = channelPair();
+  const host = await hostPage(hostPlugin, a);
+  const guest = await guestPage(guestPlugin, b);
+  host.open();
+  await settle();
+  assert.deepEqual(sent(b).find((m) => m.t === "addone"), { t: "addone", id: 1, shown: false, reason: "cooldown" });
+  await advance(2 * LINK_AD_GATE_MAX_MS);
+  assert.equal(hostPlugin.names().includes("getStateBase64"), false);
+  assert.equal(sentTypes(b).includes("abort"), false);
+  assert.equal(guest.stops, 0);
+  assert.equal(hostPlugin.hold, true);
+  ads.host.close();
+  await settle();
+  assert.deepEqual(startArgs(hostPlugin).map((s) => s.epoch), [1]);
+  assert.deepEqual(startArgs(guestPlugin).map((s) => s.epoch), [1]);
+  cleanup();
+});
+
+test("EJS guest: its heartbeat is armed at boot (30 s); the gate raises it, 30 s again once both ads are closed", async (t) => {
+  useClock(t);
+  ads.guest = fakeAd();
+  const emu = fakeEmu();
+  const [a, b] = channelPair();
+  const calls = await ejsGuestPage(b, emu);
+  const h = scripted(a, false); // an EJS host
+  await h.io.sendBytes({ t: "rom", ...GAME }, ROM);
+  await advance(2000); // a few heartbeats: the guest knows this host beats; armed at boot (onEjsStarted)
+  assert.equal(calls.boots, 1);
+  assert.deepEqual(h.got, [{ t: "booted", ads: 1 }]);
+  assert.ok(emu.lockstep, "the EJS lockstep is attached");
+  h.io.send({ t: "adgate", id: 1 });
+  await settle();
+  assert.deepEqual(ads.guest.calls, ["link-start"]);
+  h.io.heartbeat.close(); // the host's WebView is throttled under its own ad: no hb
+  await advance(40000); // > the EJS armed 30 s
+  assert.ok(emu.lockstep, "still linked");
+  assert.equal(emu.pauses, 0);
+  ads.guest.close();
+  await settle();
+  assert.deepEqual(h.got[1], { t: "addone", id: 1, shown: true, reason: "shown" });
+  h.io.send({ t: "addone", id: 1, shown: false, reason: "cooldown" });
+  await h.io.sendBytes({ t: "state", epoch: 1, applied: [{}, {}] }, Uint8Array.from([0, 1, 2]));
+  await settle();
+  assert.deepEqual(emu.loaded, [[0, 1, 2]]);
+  // Both ads closed: the armed EJS limit (30 s) again; the host stays silent.
+  await advance(28000);
+  assert.ok(emu.lockstep, "28 s of silence after the gate");
+  await advance(4000);
+  assert.equal(emu.lockstep, undefined); // lost: detached
+  assert.equal(emu.pauses, 1);
+  await advance(3000);
+  assert.equal(win.location.href, "../index.html?from=game"); // the game ran
+  delete win.EJS_emulator;
   cleanup();
 });

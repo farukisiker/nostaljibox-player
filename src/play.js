@@ -11,7 +11,7 @@ import "../native/agents/sonnet-5-5/native.css";
 import "../native/agents/gemini-argon/js/native-menu.js";
 import "../native/agents/gemini-argon/js/native-menu.css";
 import { adHook } from "./ad-hook.js";
-import { playClock } from "../native/agents/sonnet-5-5/js/play-clock.js";
+import { playClock, followNativeState, followEjsPlaying } from "../native/agents/sonnet-5-5/js/play-clock.js";
 import { installPausedHint } from "../native/agents/fable/js/paused-hint.js";
 
 translatePage();
@@ -133,7 +133,8 @@ function fail(msg) {
 
 // Single-player pause ad (NETPLAY.md §13.2): the menu pauses the game first, then the app's hook
 // may show an ad; the game stays paused and the menu open. Never while linked. The 12-minute
-// threshold is the app's; here only the in-session play time is counted and handed over.
+// threshold is the app's; here only the in-session play time is counted and handed over (only while
+// the game runs: a menu that pauses it stops the clock, play-clock.js follow*).
 const clock = playClock();
 let gating = false;
 async function pauseGate() {
@@ -169,11 +170,14 @@ document.addEventListener("pointerdown", (ev) => {
 document.getElementById("back").addEventListener("click", () => {
   location.href = "../index.html?from=game";
 });
-// EmulatorJS's own bottom menu bar; its corner button is hidden in play.css.
+// EmulatorJS's own bottom menu bar; its corner button is hidden in play.css. With the app's ad hook
+// the game pauses for the pause ad (▶ in the bar resumes it); without it (the player on its own)
+// the menu does what it always did and the game runs on behind it.
 document.getElementById("emu-menu").addEventListener("click", () => {
   const emu = window.EJS_emulator;
   if (!emu || !emu.menu) return;
   emu.menu.toggle();
+  if (!adHook.supported) return;
   const bar = emu.elements && emu.elements.menu;
   const open = !!bar && !bar.classList.contains("ejs_menu_bar_hidden");
   if (open && !document.body.classList.contains("linked")) {
@@ -241,6 +245,7 @@ function boot(game, rom, onStart, gameId = id) {
       if (BROKEN_SHADERS.includes(emu.getSettingValue("shader"))) emu.changeSettingOption("shader", "sabr");
       bindComboButton(emu);
       clock.start();
+      followEjsPlaying(clock, emu);
       if (onStart) onStart(emu);
       autoOpenHostLink({ params });
     },
@@ -295,6 +300,7 @@ if (params.has("join") && reloaded) {
     current = { game, rom }; // the host link needs the ROM in native mode too (boot() is not called then)
     if (await installNativeMode({ params, game, rom, PADS, lockOrientation, bootEmulator: () => boot(game, rom) })) {
       clock.start();
+      followNativeState(clock, window.nbNative?.plugin);
       return;
     }
     boot(game, rom);

@@ -9,9 +9,13 @@
 //     background or a slow Android process used to wait indefinitely; §10.4 is still open, so the
 //     short limit applies to native pairs only).
 // A tick that comes > 2 s late means this JS was suspended (background); the silence is forgiven once.
-// setPreArmLimit(ms) (NETPLAY.md §13.3): the native pre-arm limit is raised while the two-phone
-// link-start ad gate is open (an ad must not read as a lost link) and set back to 30 s after it.
-// It has no effect on EJS (no pre-arm limit there) or after arm().
+// setPreArmLimit(ms) (NETPLAY.md §13.3): sets the native pre-arm limit (default 30 s). It has no
+// effect on EJS (no pre-arm limit there) or after arm().
+// setGateLimit(ms) (NETPLAY.md §13.3): while the two-phone link-start ad gate is open, an ad must
+// not read as a lost link. The gate limit applies on both backends, armed or not (an EJS guest arms
+// at boot, before the gate), and only ever raises the limit: the limit is the larger of the gate
+// limit and the usual one (a peer with no limit keeps none). setGateLimit(null) clears it, and so
+// does arm() on a native pair (the game runs on both phones: the gate is over).
 export const HB_INTERVAL_MS = 1000;
 export const HB_ARMED_LIMIT_MS = 5000;
 export const HB_ARMED_EJS_MS = 30000;
@@ -33,11 +37,12 @@ export function createHeartbeat({
   let lost = false;
   let timer = null;
   let preArm = HB_PREARM_NATIVE_MS;
+  let gateLimit = null; // setGateLimit: the link-start ad gate's limit while it is open
 
   const limit = () => {
     if (!peerBeats) return Infinity;
-    if (armed) return native ? HB_ARMED_LIMIT_MS : HB_ARMED_EJS_MS;
-    return native ? preArm : Infinity;
+    const usual = armed ? (native ? HB_ARMED_LIMIT_MS : HB_ARMED_EJS_MS) : native ? preArm : Infinity;
+    return gateLimit === null ? usual : Math.max(usual, gateLimit);
   };
   const close = () => {
     if (timer !== null) clearInterval(timer);
@@ -69,9 +74,13 @@ export function createHeartbeat({
     },
     arm() {
       armed = true;
+      if (native) gateLimit = null; // the native game starts only after the gate (EJS guests arm at boot)
     },
     setPreArmLimit(ms = HB_PREARM_NATIVE_MS) {
       preArm = ms;
+    },
+    setGateLimit(ms = null) {
+      gateLimit = ms == null ? null : ms;
     },
     close,
     get active() {

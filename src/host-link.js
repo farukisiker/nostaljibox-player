@@ -88,6 +88,8 @@ function connectFailed() {
 
 // Every way the link ends goes through here: the lockstep detaches (native: lockstepStop, which also
 // clears the session hold), the heartbeat and startup timers stop, the peer connection closes.
+// While this phone's link-start ad is still on screen, the game stays frozen under it: the lockstep
+// detaches (and single player goes on) only once the ad is closed.
 function hangUp() {
   stopInbox();
   if (tcpAccept) tcpAccept.stop();
@@ -95,11 +97,15 @@ function hangUp() {
   clearTimeout(connectTimer);
   connectTimer = null;
   answered = false;
+  const ad = gate && !gate.ownDone ? gate.ownAd : null;
   if (gate) gate.cancel(); // an ad still on screen ends on its own; its result goes nowhere
   gate = null;
   if (startup) startup.clear();
   startup = null;
-  if (sync) sync.detach();
+  if (sync && ad) {
+    const frozen = sync;
+    ad.then(() => frozen.detach());
+  } else if (sync) sync.detach();
   sync = null;
   if (io) io.close();
   io = null;
@@ -164,28 +170,44 @@ function linkUp(channel, e, native) {
   toast(t("p2Connected"));
   const { game, rom } = currentGame();
   // The savestate goes out and the guest has 30 s to answer `ready` (native: the lockstep resolves
-  // once the state's last chunk is queued; the EJS resync returns nothing and has no timeout).
-  const sendState = () =>
-    Promise.resolve(sync.resync())
-      .then(() => startup && startup.expect("ready"))
+  // once the state's last chunk is queued; the EJS resync returns nothing and has no timeout). With
+  // a link-start gate, the 30 s start only once both ads are closed: a guest still in its ad keeps
+  // the state until then (the raised heartbeat limit still catches a dead guest meanwhile).
+  let stateOut = false; // the state went out (sendState resolved)
+  let readyIn = false; // the guest answered ready to that state
+  const expectReady = () => {
+    if (stateOut && !readyIn && startup && (!gate || gate.settled)) startup.expect("ready");
+  };
+  const sendState = () => {
+    stateOut = readyIn = false;
+    return Promise.resolve(sync.resync())
+      .then(() => {
+        stateOut = true;
+        expectReady();
+      })
       .catch(() => {
         // getStateBase64 or the send failed: don't stay frozen for a ready that cannot come.
         if (io) io.send({ t: "abort", reason: "state" });
         toast(nt("guestStartFailed"));
         hangUp();
       });
-  // Link-start ad gate (NETPLAY.md §13.3): both phones are frozen and loaded; each shows its own ad,
-  // the state goes out once both are closed (or after LINK_AD_GATE_MAX_MS). No startup timer meanwhile
-  // (the cap is the gate's own limit); the heartbeat's pre-arm limit is raised for the ad.
+  };
+  // Link-start ad gate (NETPLAY.md §13.3): both phones are frozen and loaded; each shows its own ad.
+  // The state goes out once this phone's ad is closed and the guest's addone came (or after
+  // LINK_AD_GATE_MAX_MS without it); never while this phone's own ad is on screen. No startup timer
+  // until both ads are closed; the heartbeat's limit is raised for the ads until then.
   const openGate = () => {
     gateHeartbeat(io, true);
     gate = adGate({
       send: (m) => io && io.send(m),
       gate: (trigger) => adHook.gate(trigger),
       onDone: () => {
+        if (sync) sendState();
+      },
+      onSettled: () => {
         if (!sync) return;
         gateHeartbeat(io, false);
-        sendState();
+        expectReady();
       },
     });
     io.send({ t: "adgate", id: 1 }); // one gate per link: always the first
@@ -211,6 +233,7 @@ function linkUp(channel, e, native) {
         hangUp();
       } else {
         if (msg.t === "ready") {
+          readyIn = true;
           startup.got("ready");
           io.armHeartbeat(); // the game runs on both phones: 5 s of silence now ends the link
         }

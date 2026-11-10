@@ -97,8 +97,9 @@ export function setupGuestLink(boot, hooks = {}) {
   }
 
   // The host's adgate (NETPLAY.md §13.3): no "state within 30 s" while the ads run (startup paused,
-  // heartbeat pre-arm limit raised); once both phones' ads are closed (or at the gate's cap) the 30 s
-  // start again and a state that came meanwhile is taken now.
+  // heartbeat limit raised, also when the EJS heartbeat is already armed). A state that comes while
+  // this phone's own ad is on screen waits for it to close (onDone), however long that takes; the
+  // 30 s and the usual heartbeat limit come back once both phones' ads are closed (onSettled).
   function openGate(id) {
     startup.pause();
     gateHeartbeat(io, true);
@@ -106,12 +107,14 @@ export function setupGuestLink(boot, hooks = {}) {
       send: (m) => io && io.send(m),
       gate: (trigger) => adHook.gate(trigger),
       onDone: () => {
-        if (!sync) return;
-        gateHeartbeat(io, false);
-        startup.resume();
         const held = pending;
         pending = null;
-        if (held) takeState(held.msg, held.bytes);
+        if (held && sync) takeState(held.msg, held.bytes);
+      },
+      onSettled: () => {
+        if (!sync) return;
+        gateHeartbeat(io, false);
+        startup.resume(); // no-op when the state was already taken
       },
     });
     gate.open(id);
