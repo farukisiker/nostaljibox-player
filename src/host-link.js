@@ -170,4 +170,15 @@ export function setupHostLink(getGame) {
     accept(code);
   });
   window.addEventListener("pagehide", hangUp);
+  // "Play together" in the library opens the game with ?host: show the invite as soon as it runs.
+  if (new URLSearchParams(location.search).has("host")) {
+    const t0 = Date.now();
+    const wait = setInterval(() => {
+      const e = emulator();
+      if ((e && e.started) || Date.now() - t0 > 60000) {
+        clearInterval(wait);
+        if (e && e.started) start();
+      }
+    }, 400);
+  }
 }
