@@ -4,6 +4,7 @@ import { get, put } from "../shared/storage.js";
 import { setupHostLink } from "./host-link.js";
 import { setupGuestLink } from "./guest-link.js";
 import { t, ejsLanguage, translatePage } from "../shared/i18n.js";
+import { EJS_BUTTONS, disableContextMenu, showSplash, setupGameMenu, setPadColor, labelPadButtons } from "./game-ui.js";
 import "./play.css";
 
 translatePage();
@@ -120,10 +121,11 @@ let current = null;
 function fail(msg) {
   errorEl.textContent = msg;
   errorEl.classList.remove("hidden");
+  document.getElementById("splash").classList.add("hidden");
 }
 
-// One button at the top centre opens a panel with the toolbar's actions, so a stray tap during
-// play can't leave the game or end two-phone play.
+// One button at the top centre opens our game menu (game-ui.js), so a stray tap during play can't
+// leave the game or end two-phone play.
 const toolsPanel = document.getElementById("tools-panel");
 const closeTools = () => toolsPanel.classList.add("hidden");
 document.getElementById("tools-toggle").addEventListener("click", (ev) => {
@@ -136,11 +138,6 @@ document.addEventListener("pointerdown", (ev) => {
 });
 document.getElementById("back").addEventListener("click", () => {
   location.href = "../index.html?from=game";
-});
-// EmulatorJS's own bottom menu bar; its corner button is hidden in play.css.
-document.getElementById("emu-menu").addEventListener("click", () => {
-  const emu = window.EJS_emulator;
-  if (emu && emu.menu) emu.menu.toggle();
 });
 
 async function lockOrientation(core) {
@@ -160,6 +157,8 @@ function boot(game, rom, onStart, gameId = id) {
   const sys = byCore[game.core];
   document.title = `${game.name} · NostaljiBox`;
   lockOrientation(game.core);
+  setPadColor(sys);
+  const hideSplash = showSplash(game, sys);
 
   // Stretch the picture over the whole screen: read the device's screen size and give RetroArch
   // that exact aspect ratio (aspect_ratio_index 20 = "Config", i.e. use video_aspect_ratio).
@@ -183,14 +182,17 @@ function boot(game, rom, onStart, gameId = id) {
     EJS_color: sys ? sys.color : "#e8452c",
     EJS_backgroundColor: "#000",
     EJS_language: ejsLanguage(),
+    // Our own menu replaces EmulatorJS's menu bar, settings menu and right-click menu.
+    EJS_Buttons: EJS_BUTTONS,
     // ROMs and cores are already local; skip EmulatorJS's own IndexedDB caches of them.
     EJS_disableDatabases: true,
     // SABR is an xBR-family edge-directed upscaler: smooths the pixel staircase while keeping
-    // edges sharp. Players can switch it in the menu (Ayarlar > Tonlayıcılar).
+    // edges sharp. Players can switch it in our menu (Görüntü).
     EJS_defaultOptions: { shader: "sabr" },
     ...(PADS[game.core] && { EJS_VirtualGamepadSettings: PADS[game.core] }),
     // "ready" fires before the core is downloaded, i.e. before RetroArch reads its config.
     EJS_ready: () => {
+      disableContextMenu(window.EJS_emulator);
       // ScaleHQ shifts the picture right on some phones (an 8-pixel strip of the backdrop shows
       // on the left), so keep it out of the shader menu. The menu is built after this event.
       const shaders = window.EJS_emulator.config.shaders || {};
@@ -201,6 +203,9 @@ function boot(game, rom, onStart, gameId = id) {
       const emu = window.EJS_emulator;
       if (BROKEN_SHADERS.includes(emu.getSettingValue("shader"))) emu.changeSettingOption("shader", "sabr");
       bindComboButton(emu);
+      labelPadButtons();
+      setupGameMenu(emu, gameId === id ? id : null);
+      hideSplash();
       if (onStart) onStart(emu);
     },
   });

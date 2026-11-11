@@ -8,6 +8,9 @@
   --muted: #a3a1c2;
   --accent: #ff3d7f;
   --accent2: #36d6ff;
+  /* Console colour for the controls and splash (game-ui.js setPadColor), and a lighter ink of it. */
+  --pad: #ff3d7f;
+  --pad-ink: #ff8fb3;
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
@@ -158,40 +161,181 @@ body.play {
   font-size: 18px;
   opacity: 0.7;
 }
-/* Drops down from the toggle with the toolbar's actions. */
+/* ---------- game menu (game-ui.js) ---------- */
+/* Drops down from the toggle: a grid of tiles, two rows on a landscape phone. */
 #tools-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(72px, 96px));
+  gap: 6px;
+  max-width: calc(100vw - 24px - var(--sal) - var(--sar));
+  padding: 8px;
+  border-radius: 18px;
+  background: linear-gradient(160deg, #1d1d38f2, #101020f2);
+  border: 1px solid #ffffff1a;
+  box-shadow: 0 14px 40px #000c, inset 0 1px 0 #ffffff14;
+}
+#tools-panel .tile {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-width: 200px;
-  padding: 6px;
-  border-radius: 14px;
-  background: #141426ee;
-  box-shadow: 0 10px 30px #000a;
-}
-#tools-panel button {
-  display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 11px 12px;
-  border: none;
-  border-radius: 10px;
-  background: none;
-  color: #fff;
-  font-size: 15px;
+  justify-content: center;
+  gap: 4px;
+  min-height: 70px;
+  padding: 8px 4px;
+  border: 1px solid #ffffff10;
+  border-radius: 14px;
+  background: #ffffff0a;
+  color: var(--text);
+  font-size: 12px;
   font-weight: 600;
-  text-align: left;
+  line-height: 1.15;
+  text-align: center;
 }
-#tools-panel button:active {
+#tools-panel .tile-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+#tools-panel .tile small {
+  color: var(--accent2);
+  font-size: 11px;
+  font-weight: 600;
+}
+#tools-panel .tile:active {
+  transform: scale(0.96);
   background: #ffffff1f;
+}
+#tools-panel .tile:disabled {
+  opacity: 0.4;
+}
+/* Toggles that are on: fast forward running, sound on. */
+#tools-panel .tile.on {
+  border-color: var(--accent);
+  background: linear-gradient(160deg, #ff3d7f33, #ff7a4522);
+}
+#tools-panel #back {
+  color: #ffd0dc;
+}
+/* Game tiles appear once the game runs; two-phone play hides the ones that jump the game. */
+body:not(.game-running) #tools-panel .tile:not(#back):not(#p2),
+body.linked #tools-panel .solo-only,
+body.guest #tools-panel .solo-only {
+  display: none;
 }
 body.guest #p2 {
   display: none;
 }
 body.linked #p2 {
-  background: #1fbf5f;
+  background: #1fbf5f55;
+  border-color: #1fbf5f;
 }
-/* On-screen controls: larger and see-through so the picture shows behind them. */
+
+/* ---------- loading splash (game-ui.js showSplash) ---------- */
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(700px 360px at 20% 0%, #ff3d7f2e, transparent 60%),
+    radial-gradient(600px 360px at 100% 100%, #36d6ff24, transparent 60%),
+    var(--bg);
+}
+.splash-card {
+  width: min(420px, 100%);
+  text-align: center;
+}
+.splash-brand {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  background: linear-gradient(90deg, var(--accent), #ff7a45, var(--accent2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+/* The console's name on a cartridge-shaped label in its colour. */
+.splash-cart {
+  display: inline-block;
+  margin: 18px 0 10px;
+  padding: 6px 14px 8px;
+  border-radius: 6px 6px 14px 14px;
+  background: var(--pad, var(--accent));
+  box-shadow: inset 0 -4px 0 #0005, 0 6px 18px #0008;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#splash h1 {
+  margin: 0 0 18px;
+  font-size: clamp(20px, 5vw, 28px);
+  line-height: 1.2;
+  word-break: break-word;
+}
+.splash-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #ffffff14;
+  overflow: hidden;
+}
+.splash-bar i {
+  display: block;
+  width: 8%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #ff7a45);
+  transition: width 0.3s ease-out;
+}
+#splash p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+#splash.failed .splash-bar {
+  display: none;
+}
+#splash.failed p {
+  color: #ff9b9b;
+}
+
+/* ---------- EmulatorJS's own UI: never shown ---------- */
+/* Start button, loading text, menu bar, its corner toggle, right-click menu and on-screen
+   messages. The menus are also switched off through EJS_Buttons (game-ui.js). */
+#game .ejs_start_button,
+#game .ejs_loading_text,
+#game .ejs_menu_bar,
+#game .ejs_virtualGamepad_open,
+#game .ejs_context_menu,
+#game .ejs_message {
+  display: none !important;
+}
+/* The only popup left: iOS asks for a tap before sound can start. Draw it as ours. */
+#game .ejs_popup_container:not([hidden]) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0b0b14d9;
+}
+#game .ejs_popup_container button {
+  width: auto !important;
+  height: auto !important;
+  padding: 16px 28px;
+  border: none;
+  border-radius: 14px;
+  background: linear-gradient(90deg, var(--accent), #ff7a45);
+  color: #fff;
+  font: 600 17px system-ui, -apple-system, sans-serif;
+}
+
+/* ---------- on-screen controls ---------- */
+/* EmulatorJS builds the buttons and handles their touches; this only gives them our look:
+   keycaps in the console's colour (--pad, set by stylePad), petal-shaped face buttons, pill-shaped
+   menu keys and a ringed stick. Pressed keys sink and light up. */
 /* Not scaled with a transform: the sliding stick measures its centre from the untransformed box. */
 #game .ejs_virtualGamepad_left {
   width: 175px;
@@ -209,22 +353,76 @@ body.linked #p2 {
 #game .ejs_virtualGamepad_right {
   bottom: calc(50vh - 50px - 130px * 1.4 / 2);
 }
-/* The toolbar panel opens EmulatorJS's menu bar instead (see copy-emulators.cjs). */
-#game .ejs_virtualGamepad_open {
-  display: none !important;
-}
 #game .ejs_virtualGamepad_button {
-  background-color: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.35);
-  color: rgba(255, 255, 255, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--pad-ink);
+  background: radial-gradient(circle at 50% 30%, #ffffff26, #0000 70%), #0b0b1459;
+  box-shadow: 0 3px 0 #0008, inset 0 0 0 1px #ffffff14;
+  color: #fff;
+  text-shadow: 0 1px 2px #000a;
+  transition: transform 60ms, background-color 60ms, box-shadow 60ms;
+}
+.pad-label {
+  pointer-events: none;
+}
+/* Face buttons in the diamond: rounded squares turned 45°, edges facing each other like petals. */
+#game .ejs_virtualGamepad_right .ejs_virtualGamepad_button:not(.b_l):not(.b_r) {
+  border-radius: 14px;
+  transform: rotate(45deg) scale(0.88);
+  font-size: 22px !important;
+}
+#game .ejs_virtualGamepad_right .ejs_virtualGamepad_button:not(.b_l):not(.b_r) .pad-label {
+  transform: rotate(-45deg);
+}
+#game .ejs_virtualGamepad_right .ejs_virtualGamepad_button.b_ab {
+  font-size: 16px !important;
+  letter-spacing: -0.02em;
 }
 /* Empty slots of the four-button diamond on consoles with fewer buttons. */
 #game .ejs_virtualGamepad_button[class*="b_blank"] {
-  opacity: 0.4;
+  border-style: dashed;
+  background: none;
+  box-shadow: none;
+  opacity: 0.3;
   pointer-events: none;
 }
-#game .ejs_virtualGamepad_button_down {
-  background-color: rgba(255, 255, 255, 0.3);
+/* Menu keys (Start, Select…) and shoulder keys: pills; shoulders are tabs facing the screen edge. */
+#game .ejs_virtualGamepad_bottom .ejs_virtualGamepad_button,
+#game .ejs_virtualGamepad_button.b_l,
+#game .ejs_virtualGamepad_button.b_r {
+  height: 28px !important;
+  border-radius: 999px !important;
+  border: 1.5px solid var(--pad-ink) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+#game .ejs_virtualGamepad_button.b_l,
+#game .ejs_virtualGamepad_button.b_r {
+  width: 64px;
+  height: 30px !important;
+  font-size: 15px !important;
+}
+#game .ejs_virtualGamepad_button.b_l {
+  border-radius: 8px 18px 18px 8px !important;
+}
+#game .ejs_virtualGamepad_button.b_r {
+  border-radius: 18px 8px 8px 18px !important;
+}
+#game .ejs_virtualGamepad_button.ejs_virtualGamepad_button_down {
+  background: var(--pad);
+  box-shadow: 0 0 0 #0008, 0 0 16px var(--pad);
+}
+#game .ejs_virtualGamepad_right .ejs_virtualGamepad_button_down:not(.b_l):not(.b_r) {
+  transform: rotate(45deg) translate(1px, 1px) scale(0.8);
+}
+#game .ejs_virtualGamepad_bottom .ejs_virtualGamepad_button_down,
+#game .ejs_virtualGamepad_button_down.b_l,
+#game .ejs_virtualGamepad_button_down.b_r {
+  transform: translateY(2px);
 }
 #game .ejs_dpad_main {
   opacity: 0.45;
@@ -238,8 +436,26 @@ body.linked #p2 {
 }
 #game .b_dpad .nipple,
 #game .b_stick .nipple {
-  opacity: 0.6;
   transform: scale(1.6);
+}
+/* The stick's base: a ring with a cross (four directions) or a plain ring (analog stick). */
+#game .nipple .back {
+  opacity: 1 !important;
+  box-sizing: border-box;
+  border: 2px solid var(--pad-ink);
+  background: #0b0b1459 !important;
+}
+#game .b_dpad .nipple .back {
+  background:
+    linear-gradient(#ffffff2e, #ffffff2e) center / 30% 84% no-repeat,
+    linear-gradient(#ffffff2e, #ffffff2e) center / 84% 30% no-repeat,
+    #0b0b1459 !important;
+}
+/* The knob: a gem in the console's colour, brighter while held (nipplejs raises its opacity). */
+#game .nipple .front {
+  opacity: 1 !important;
+  background: radial-gradient(circle at 40% 35%, #ffffff80, #0000 55%), var(--pad) !important;
+  box-shadow: 0 2px 6px #000a, 0 0 0 2px #ffffff40;
 }
 #error {
   position: fixed;

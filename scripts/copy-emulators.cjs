@@ -58,8 +58,9 @@ for (const [from, to] of Object.entries(coreMap)) {
   if (!bundle.includes(from)) throw new Error(`EmulatorJS core table changed, cannot find ${from}`);
   bundle = bundle.replace(from, to);
 }
-// The bottom menu bar opens only from the toolbar panel (play.js): not when the game starts, and not from
-// mouse moves or clicks (iOS turns taps near the bottom edge into mouse moves that open it).
+// EmulatorJS's bottom menu bar never opens: NostaljiBox has its own game menu (game-ui.js). Keep it
+// from opening when the game starts and on mouse moves or clicks (iOS turns taps near the bottom
+// edge into mouse moves that open it); play.css also hides it.
 const menuPatches = {
   "            this.menu.open();\n            if (this.isSafari && this.isMobile) {": "            if (this.isSafari && this.isMobile) {",
   "        this.createBottomMenuBarListeners = () => {": "        this.createBottomMenuBarListeners = () => {};\n        const unusedMenuBarListeners = () => {",

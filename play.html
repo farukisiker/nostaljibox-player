@@ -11,10 +11,26 @@
     <div id="game"></div>
     <div id="play-tools">
       <button id="tools-toggle" aria-label="Menü" data-i18n-label="tools">☰</button>
+      <!-- Our own game menu (play.js setupGameMenu); EmulatorJS's menus are switched off. -->
       <div id="tools-panel" class="hidden">
-        <button id="back"><span>←</span> <span data-i18n="back">Kütüphaneye dön</span></button>
-        <button id="p2"><span>👥</span> <span data-i18n="addP2">2. oyuncu ekle</span></button>
-        <button id="emu-menu"><span>⚙</span> <span data-i18n="emuMenu">Oyun menüsü</span></button>
+        <button id="save-state" class="tile solo-only"><span class="tile-icon">💾</span> <span data-i18n="saveState">Durumu kaydet</span></button>
+        <button id="load-state" class="tile solo-only"><span class="tile-icon">📂</span> <span data-i18n="loadState">Durumu yükle</span></button>
+        <button id="restart" class="tile solo-only"><span class="tile-icon">↻</span> <span data-i18n="restart">Baştan başlat</span></button>
+        <button id="fast-forward" class="tile solo-only keep-open"><span class="tile-icon">⏩</span> <span data-i18n="fastForward">Hızlı ileri</span></button>
+        <button id="filter" class="tile keep-open"><span class="tile-icon">✨</span> <span data-i18n="filter">Görüntü</span> <small id="filter-name"></small></button>
+        <button id="sound" class="tile keep-open"><span class="tile-icon" id="sound-icon">🔊</span> <span data-i18n="sound">Ses</span></button>
+        <button id="p2" class="tile"><span class="tile-icon">👥</span> <span data-i18n="addP2">2. oyuncu ekle</span></button>
+        <button id="back" class="tile"><span class="tile-icon">←</span> <span data-i18n="back">Kütüphaneye dön</span></button>
+      </div>
+    </div>
+    <!-- Shown until the game runs (play.js showSplash); EmulatorJS's own loading text is hidden. -->
+    <div id="splash" class="hidden">
+      <div class="splash-card">
+        <div class="splash-brand">NostaljiBox</div>
+        <div class="splash-cart"><span id="splash-system"></span></div>
+        <h1 id="splash-game"></h1>
+        <div class="splash-bar"><i id="splash-progress"></i></div>
+        <p id="splash-status" data-i18n="loadingGame">Oyun yükleniyor…</p>
       </div>
     </div>
     <div id="error" class="hidden"></div>
